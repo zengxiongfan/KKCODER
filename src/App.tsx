@@ -1212,6 +1212,7 @@ function App() {
       type: selectedAgent,
       agentSessionId,
       favorite: 0, // 初始默认为未收藏
+      createdAt: new Date().toISOString(),
     };
 
     log(`Invoking add_session to SQLite...`);

@@ -500,7 +500,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [regularSortedProjNames]);
 
-  const sortedProjectNames = [...favProjNames, ...regularSortedProjNames];
+  // 当前活跃会话所属项目置顶（优先级：收藏项目 > 当前项目 > 普通项目）
+  const activeProjectName = sessions.find((s) => s.id === activeSessionId)?.project;
+  const activeIsFavorited = activeProjectName ? favProjNames.includes(activeProjectName) : false;
+  const pinnedRegularProjects = (() => {
+    if (!activeProjectName || activeIsFavorited) return regularSortedProjNames;
+    if (!regularSortedProjNames.includes(activeProjectName)) return regularSortedProjNames;
+    return [activeProjectName, ...regularSortedProjNames.filter((name) => name !== activeProjectName)];
+  })();
+
+  const sortedProjectNames = [...favProjNames, ...pinnedRegularProjects];
 
   // 6. 行内编辑操作
   const startEditing = (session: Session) => {
