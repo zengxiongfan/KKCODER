@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { DirectoryPickerModal } from "./DirectoryPickerModal";
 import {
   DEFAULT_SESSION_CLEANUP_DAYS,
   MIN_SESSION_CLEANUP_DAYS,
@@ -33,6 +34,13 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onSessionsRenamed }) => {
   const [activeMenu, setActiveMenu] = useState<"general" | "sessions" | "about">("general");
+  const [showFilePicker, setShowFilePicker] = useState(false);
+
+  useEffect(() => {
+    if (show) {
+      setShowFilePicker(false);
+    }
+  }, [show]);
 
   // 播放提示音效预览（不显示通知气泡）
   const triggerPreview = (tone: string, volume: number) => {
@@ -286,11 +294,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   }, [idleMinutes]);
 
 
-  // 监听键盘 ESC 键关闭设置弹窗
+  // 监听键盘 ESC 键关闭设置弹窗与子弹窗
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        if (showFilePicker) {
+          setShowFilePicker(false);
+        } else {
+          onClose();
+        }
       }
     };
     if (show) {
@@ -299,7 +311,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [show, onClose]);
+  }, [show, onClose, showFilePicker]);
 
   // --- 3. 动态应用主题色彩系统 ---
   const applyTheme = (themeName: string) => {
@@ -873,16 +885,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
                     />
                     <button
                       type="button"
-                      onClick={async () => {
-                        try {
-                          const selected = await invoke<string | null>("select_ccswitch_file");
-                          if (selected) {
-                            setCcswitchPath(selected);
-                          }
-                        } catch (err) {
-                          console.error("选择文件失败:", err);
-                        }
-                      }}
+                      onClick={() => setShowFilePicker(true)}
                       style={{
                         padding: "6px 12px",
                         borderRadius: "6px",
@@ -1297,6 +1300,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
           </div>
         </div>
       </div>
+
+      {/* 内置文件选择框，选择 ccswitch.exe 路径 */}
+      <DirectoryPickerModal
+        show={showFilePicker}
+        onClose={() => setShowFilePicker(false)}
+        onSelect={(path) => setCcswitchPath(path)}
+        initialPath={ccswitchPath || "D:\\"}
+        mode="file"
+        extensions={["exe"]}
+        title="选择 ccswitch.exe 路径"
+      />
     </div>
   );
 };

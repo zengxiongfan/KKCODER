@@ -566,6 +566,202 @@ fn select_directory() -> Option<String> {
     folder.map(|p| p.to_string_lossy().to_string())
 }
 
+#[derive(serde::Serialize)]
+struct DirEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
+#[derive(serde::Serialize)]
+struct DirListResult {
+    current_path: String,
+    parent_path: Option<String>,
+    entries: Vec<DirEntry>,
+    drives: Vec<String>,
+    home_dir: Option<String>,
+    desktop_dir: Option<String>,
+}
+
+#[cfg(target_os = "windows")]
+mod win_drives {
+    extern "system" {
+        fn GetLogicalDrives() -> u32;
+    }
+
+    pub fn get_drives() -> Vec<String> {
+        let mut drives = Vec::new();
+        unsafe {
+            let mask = GetLogicalDrives();
+            for i in 0..26 {
+                if (mask & (1 << i)) != 0 {
+                    let drive = format!("{}:\\", (b'A' + i) as char);
+                    drives.push(drive);
+                }
+            }
+        }
+        drives
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod win_drives {
+    pub fn get_drives() -> Vec<String> {
+        vec!["/".to_string()]
+    }
+}
+
+#[tauri::command]
+fn list_directory_folders(
+    path: Option<String>,
+    show_files: Option<bool>,
+    extensions: Option<Vec<String>>,
+) -> Result<DirListResult, String> {
+    let mut target_path = if let Some(ref p) = path {
+        if p.trim().is_empty() {
+            dirs::home_dir().ok_or_else(|| "无法获取用户主目录".to_string())?
+        } else {
+            std::path::PathBuf::from(p)
+        }
+    } else {
+        dirs::home_dir().ok_or_else(|| "无法获取用户主目录".to_string())?
+    };
+
+    // 如果给出的路径是一个存在的文件，则使用其父目录作为遍历起点
+    if target_path.exists() && target_path.is_file() {
+        if let Some(parent) = target_path.parent() {
+            target_path = parent.to_path_buf();
+        }
+    }
+
+    // 如果路径不存在，尝试返回其父目录或主目录
+    if !target_path.exists() {
+        if let Some(parent) = target_path.parent() {
+            if parent.exists() && parent.is_dir() {
+                target_path = parent.to_path_buf();
+            } else {
+                target_path = dirs::home_dir().ok_or_else(|| "无法获取用户主目录".to_string())?;
+            }
+        } else {
+            target_path = dirs::home_dir().ok_or_else(|| "无法获取用户主目录".to_string())?;
+        }
+    }
+
+    // 规范化路径，在 Windows 下去除 UNC 前缀 \\?\
+    let canonical = target_path.canonicalize().unwrap_or_else(|_| target_path.clone());
+    let canonical_str = canonical.to_string_lossy().to_string();
+    let clean_current = if canonical_str.starts_with(r"\\?\") {
+        canonical_str[4..].to_string()
+    } else {
+        canonical_str
+    };
+
+    let target_path_clean = std::path::PathBuf::from(&clean_current);
+
+    let show_files_val = show_files.unwrap_or(false);
+    let mut entries_list = Vec::new();
+    if let Ok(dir_entries) = std::fs::read_dir(&target_path_clean) {
+        for entry in dir_entries {
+            if let Ok(entry) = entry {
+                let p = entry.path();
+                let file_name = p.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                // 跳过隐藏文件夹与系统敏感文件夹
+                if file_name.starts_with('.') && file_name != "." && file_name != ".." {
+                    continue;
+                }
+                if file_name.eq_ignore_ascii_case("System Volume Information") || file_name.starts_with('$') {
+                    continue;
+                }
+
+                let is_dir = p.is_dir();
+                
+                if !is_dir && !show_files_val {
+                    continue; // 过滤文件，如果不需要显示文件
+                }
+
+                // 如果需要显示文件，且有扩展名过滤器
+                if !is_dir && show_files_val {
+                    if let Some(ref exts) = extensions {
+                        let matches_filter = p.extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e_str| exts.iter().any(|x| x.eq_ignore_ascii_case(e_str)))
+                            .unwrap_or(false);
+                        
+                        if !matches_filter {
+                            continue; // 过滤掉不匹配后缀的文件
+                        }
+                    }
+                }
+
+                let p_str = p.to_string_lossy().to_string();
+                let clean_p = if p_str.starts_with(r"\\?\") {
+                    p_str[4..].to_string()
+                } else {
+                    p_str
+                };
+
+                entries_list.push(DirEntry {
+                    name: file_name,
+                    path: clean_p,
+                    is_dir,
+                });
+            }
+        }
+    }
+
+    // 排序逻辑：文件夹优先展示在前面，然后按字母不区分大小写排序
+    entries_list.sort_by(|a, b| {
+        if a.is_dir != b.is_dir {
+            b.is_dir.cmp(&a.is_dir)
+        } else {
+            a.name.to_lowercase().cmp(&b.name.to_lowercase())
+        }
+    });
+
+    // 获取父路径并清理
+    let parent_path = target_path_clean.parent().map(|p| {
+        let p_str = p.to_string_lossy().to_string();
+        if p_str.starts_with(r"\\?\") {
+            p_str[4..].to_string()
+        } else {
+            p_str
+        }
+    });
+
+    let drives = win_drives::get_drives();
+    
+    let home_dir = dirs::home_dir().map(|p| {
+        let p_str = p.to_string_lossy().to_string();
+        if p_str.starts_with(r"\\?\") {
+            p_str[4..].to_string()
+        } else {
+            p_str
+        }
+    });
+
+    let desktop_dir = dirs::desktop_dir().map(|p| {
+        let p_str = p.to_string_lossy().to_string();
+        if p_str.starts_with(r"\\?\") {
+            p_str[4..].to_string()
+        } else {
+            p_str
+        }
+    });
+
+    Ok(DirListResult {
+        current_path: clean_current,
+        parent_path,
+        entries: entries_list,
+        drives,
+        home_dir,
+        desktop_dir,
+    })
+}
+
 // 5b. 呼起系统原生文件选择框选择 ccswitch.exe 路径
 #[tauri::command]
 fn select_ccswitch_file() -> Option<String> {
@@ -2447,6 +2643,7 @@ pub fn run() {
             cleanup_empty_sessions,
             get_recent_projects,
             select_directory,
+            list_directory_folders,
             open_project_folder,
             open_terminal_path,
             spawn_terminal,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { DirectoryPickerModal } from "./DirectoryPickerModal";
 
 interface NewSessionModalProps {
   show: boolean;
@@ -17,9 +18,10 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
   initialProjectPath,
 }) => {
   const [sessionTitle, setSessionTitle] = useState("");
-  const [projectPath, setProjectPath] = useState("D:\\CODE");
+  const [projectPath, setProjectPath] = useState("D:\\");
   const [searchQuery, setSearchQuery] = useState("");
   const [recentProjects, setRecentProjects] = useState<Array<{ name: string; path: string }>>([]);
+  const [showDirPicker, setShowDirPicker] = useState(false);
   const [confirmDirState, setConfirmDirState] = useState<{
     path: string;
     sessionTitle: string;
@@ -31,6 +33,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     if (show) {
       setSessionTitle("");
       setConfirmDirState(null);
+      setShowDirPicker(false);
       if (initialProjectPath) {
         setProjectPath(initialProjectPath);
         // 也获取一下最近项目列表，以保持下拉菜单可用
@@ -48,22 +51,24 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
             if (data && data.length > 0) {
               setProjectPath(data[0].path);
             } else {
-              setProjectPath("D:\\CODE");
+              setProjectPath("D:\\");
             }
           })
           .catch((err) => {
             console.error("获取本地最近项目失败", err);
-            setProjectPath("D:\\CODE");
+            setProjectPath("D:\\");
           });
       }
     }
   }, [show, initialProjectPath]);
 
-  // 监听 ESC 键关闭新建会话弹窗与物理目录确认弹窗
+  // 监听 ESC 键关闭新建会话弹窗与子弹窗
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (confirmDirState) {
+        if (showDirPicker) {
+          setShowDirPicker(false);
+        } else if (confirmDirState) {
           setConfirmDirState(null);
         } else {
           onClose();
@@ -76,27 +81,26 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [show, onClose, confirmDirState]);
+  }, [show, onClose, confirmDirState, showDirPicker]);
 
-  // 调用 Rust 后端本地文件选择框
-  const handleBrowse = async () => {
-    try {
-      const selected = await invoke<string | null>("select_directory");
-      if (selected) {
-        // 去除末尾斜杠，保持路径一致性
-        const cleanPath = selected.replace(/[\\/]+$/, "");
-        setProjectPath(cleanPath);
-        // 自动提取项目名称
-        const parts = cleanPath.split(/[\\/]/);
-        const name = parts[parts.length - 1] || "未命名项目";
+  // 打开内置目录选择器
+  const handleBrowse = () => {
+    setShowDirPicker(true);
+  };
 
-        // 若该项目不在最近列表中，则动态追加
-        if (!recentProjects.some((p) => p.path === cleanPath)) {
-          setRecentProjects([{ name, path: cleanPath }, ...recentProjects]);
-        }
+  const handleDirSelect = (selected: string) => {
+    if (selected) {
+      // 去除末尾斜杠，保持路径一致性
+      const cleanPath = selected.replace(/[\\/]+$/, "");
+      setProjectPath(cleanPath);
+      // 自动提取项目名称
+      const parts = cleanPath.split(/[\\/]/);
+      const name = parts[parts.length - 1] || "未命名项目";
+
+      // 若该项目不在最近列表中，则动态追加
+      if (!recentProjects.some((p) => p.path === cleanPath)) {
+        setRecentProjects([{ name, path: cleanPath }, ...recentProjects]);
       }
-    } catch (err) {
-      console.error("无法调用文件选择框", err);
     }
   };
 
@@ -280,6 +284,14 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* 6. 内置目录选择框 */}
+      <DirectoryPickerModal
+        show={showDirPicker}
+        onClose={() => setShowDirPicker(false)}
+        onSelect={handleDirSelect}
+        initialPath={projectPath}
+      />
     </div>
   );
 };
