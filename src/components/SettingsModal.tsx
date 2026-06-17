@@ -123,6 +123,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
     ];
   });
 
+  const [ccswitchPath, setCcswitchPath] = useState<string>(() => {
+    return localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+  });
+
+  useEffect(() => {
+    localStorage.setItem("kkcoder_setting_ccswitch_path", ccswitchPath);
+    window.dispatchEvent(new CustomEvent("kkcoder-ccswitch-path-change", { detail: ccswitchPath }));
+  }, [ccswitchPath]);
+
+
+
   // --- 会话名称修正设置 ---
   const [autoRenameOnStartup, setAutoRenameOnStartup] = useState<boolean>(() => {
     return localStorage.getItem(AUTO_RENAME_ON_STARTUP_KEY) === "true";
@@ -828,6 +839,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
             ) : activeMenu === "sessions" ? (
               <div className="settings-content">
+                {/* ccswitch.exe 路径 */}
+                <div className="settings-group">
+                  <div className="settings-group-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>ccswitch.exe 路径</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "normal" }}>
+                      （点击右上角图标时启动的程序路径）
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+                    <input
+                      type="text"
+                      placeholder="例如: C:\Program Files\ccswitch\ccswitch.exe"
+                      value={ccswitchPath}
+                      onChange={(e) => setCcswitchPath(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: "var(--bg-input)",
+                        color: "var(--text-primary)",
+                        fontSize: "13px",
+                        outline: "none",
+                        transition: "border-color var(--transition-smooth)",
+                      }}
+                      onFocus={(e) => {
+                        e.target.style.borderColor = "var(--color-primary)";
+                      }}
+                      onBlurCapture={(e) => {
+                        e.target.style.borderColor = "var(--border-color)";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const selected = await invoke<string | null>("select_ccswitch_file");
+                          if (selected) {
+                            setCcswitchPath(selected);
+                          }
+                        } catch (err) {
+                          console.error("选择文件失败:", err);
+                        }
+                      }}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: "var(--bg-hover-item)",
+                        color: "var(--text-primary)",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      浏览...
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: "1px solid var(--border-color)", margin: "8px 0" }} />
+
                 {/* 1. 回滚行数 */}
                 <div className="settings-group">
                   <div className="settings-group-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}>

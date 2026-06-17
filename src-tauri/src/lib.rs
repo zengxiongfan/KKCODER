@@ -566,7 +566,39 @@ fn select_directory() -> Option<String> {
     folder.map(|p| p.to_string_lossy().to_string())
 }
 
-// 6. 在资源管理器中打开指定项目目录
+// 5b. 呼起系统原生文件选择框选择 ccswitch.exe 路径
+#[tauri::command]
+fn select_ccswitch_file() -> Option<String> {
+    let file = rfd::FileDialog::new()
+        .set_title("选择 ccswitch.exe 路径")
+        .add_filter("可执行文件", &["exe"])
+        .pick_file();
+    file.map(|p| p.to_string_lossy().to_string())
+}
+
+// 5c. 打开指定的 ccswitch.exe 可执行文件
+#[tauri::command]
+fn launch_ccswitch(path: String) -> Result<(), String> {
+    log_to_file(&format!("launch_ccswitch called: path={}", path));
+    let p = std::path::Path::new(&path);
+    if !p.exists() || !p.is_file() {
+        return Err("指定的 ccswitch.exe 路径不存在或不是有效文件，请在设置中配置正确路径。".to_string());
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new(p)
+            .spawn()
+            .map_err(|e| format!("启动 ccswitch 失败: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("该功能仅在 Windows 系统中可用".to_string())
+    }
+}
+
+
 #[tauri::command]
 fn open_project_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -584,27 +616,36 @@ fn open_project_folder(path: String) -> Result<(), String> {
     }
 }
 
-// 6b. 打开终端中检测到的文件路径 (如果是文件则打开其所在的父目录)
+// 6b. 打开终端中检测到的文件路径 (如果是文件则在文件管理器中选中该文件)
 #[tauri::command]
 fn open_terminal_path(path: String) -> Result<(), String> {
     use std::path::Path;
     let p = Path::new(&path);
     if p.exists() {
-        let dir = if p.is_file() {
-            p.parent().unwrap_or(p)
-        } else {
-            p
-        };
         #[cfg(target_os = "windows")]
         {
-            std::process::Command::new("explorer")
-                .arg(dir)
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            if p.is_file() {
+                use std::os::windows::process::CommandExt;
+                let win_path = path.replace('/', "\\");
+                std::process::Command::new("explorer")
+                    .raw_arg(format!(r#"/select,"{}""#, win_path))
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            } else {
+                std::process::Command::new("explorer")
+                    .arg(p)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
             return Ok(());
         }
         #[cfg(not(target_os = "windows"))]
         {
+            let dir = if p.is_file() {
+                p.parent().unwrap_or(p)
+            } else {
+                p
+            };
             let _ = dir;
             return Err("该操作系统暂不支持直接打开文件夹".to_string());
         }
@@ -2434,7 +2475,9 @@ pub fn run() {
             search_project_files,
             read_project_file_content,
             open_file_in_system,
-            open_in_file_manager
+            open_in_file_manager,
+            select_ccswitch_file,
+            launch_ccswitch
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

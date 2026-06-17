@@ -1659,13 +1659,6 @@ input:checked + .switch-slider:before {
   color: var(--text-primary);
 }
 
-.settings-gear-btn svg {
-  transition: transform 0.3s ease;
-}
-
-.settings-gear-btn:hover svg {
-  transform: rotate(45deg); /* 仅旋转内部齿轮图标，不旋转外边框卡片 */
-}
 
 .close-btn:hover {
   background-color: #ef4444 !important;

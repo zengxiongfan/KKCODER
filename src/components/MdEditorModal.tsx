@@ -222,7 +222,6 @@ export const MdEditorModal: React.FC<MdEditorModalProps> = ({
               onClick={handleSave}
               disabled={isSaving}
             >
-              <span>💾</span>
               <span>{isSaving ? "保存中..." : "保存"}</span>
             </button>
 

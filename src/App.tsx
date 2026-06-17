@@ -78,6 +78,17 @@ function App() {
     appWindow.close().catch((err) => log(`Failed to close window: ${err}`));
   };
 
+  const handleLaunchCcswitch = () => {
+    const path = localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+    if (!path.trim()) {
+      alert("请先在「设置」->「终端设置」中配置 ccswitch.exe 的路径。");
+      return;
+    }
+    invoke("launch_ccswitch", { path }).catch((err) => {
+      alert(`启动 ccswitch.exe 失败:\n${err}`);
+    });
+  };
+
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const activeSessionIdRef = useRef<string>("");
@@ -1782,6 +1793,16 @@ function App() {
         </div>
 
         <div className="titlebar-actions" onMouseDown={(e) => e.stopPropagation()}>
+          <button
+            className="titlebar-btn ccswitch-btn"
+            onClick={handleLaunchCcswitch}
+            title="打开 CCSwitch"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+              <circle cx="16" cy="12" r="3"></circle>
+            </svg>
+          </button>
           <div className="theme-selector-wrapper">
             <button
               className={`titlebar-btn theme-palette-btn ${showThemeDropdown ? "active" : ""}`}
@@ -1891,20 +1912,23 @@ function App() {
             )}
           </div>
 
-          <button
-            className={`titlebar-btn toggle-project-tree-btn ${showProjectTree ? "active" : ""}`}
-            onClick={() => {
-              const newVal = !showProjectTree;
-              setShowProjectTree(newVal);
-              localStorage.setItem("kkcoder_show_project_tree", String(newVal));
-            }}
-            title={showProjectTree ? "关闭工作区文件树" : "打开工作区文件树"}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="16" y1="3" x2="16" y2="21"></line>
-            </svg>
-          </button>
+          {!activeSession?.isTemp && (
+            <button
+              className={`titlebar-btn toggle-project-tree-btn ${showProjectTree ? "active" : ""}`}
+              onClick={() => {
+                const newVal = !showProjectTree;
+                setShowProjectTree(newVal);
+                localStorage.setItem("kkcoder_show_project_tree", String(newVal));
+              }}
+              title={showProjectTree ? "关闭工作区文件树" : "打开工作区文件树"}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="3" x2="16" y2="21"></line>
+              </svg>
+            </button>
+          )}
+
 
           <button
             className="titlebar-btn settings-gear-btn"
@@ -2466,7 +2490,7 @@ function App() {
           </div>
         </main>
 
-        {showProjectTree && (
+        {showProjectTree && !activeSession?.isTemp && (
           <>
             <div 
               className={`project-tree-resizer ${isResizingProjectTree ? "dragging" : ""}`} 
