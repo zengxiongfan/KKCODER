@@ -409,6 +409,18 @@ body {
   background-color: var(--bg-hover-item);
 }
 
+/* 展开更多 / 收起 按钮 */
+.expand-collapse-btn {
+  padding: 2px 12px 2px 46px;
+  font-size: 11px;
+  color: var(--color-primary);
+  cursor: pointer;
+  user-select: none;
+}
+.expand-collapse-btn:hover {
+  text-decoration: underline;
+}
+
 /* 活动选中的会话项目：随主题切换的淡彩色/深色高亮底色 */
 .session-item.active {
   background-color: var(--bg-active-item) !important; /* 贴边选中激活底色 */

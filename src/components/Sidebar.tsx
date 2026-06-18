@@ -851,19 +851,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </ul>
                   {hiddenCount > 0 && (
                     <div
+                      className="expand-collapse-btn"
                       onClick={(e) => {
                         e.stopPropagation();
                         setFavoritesExpanded(!favoritesExpanded);
-                      }}
-                      style={{
-                        padding: "4px 12px",
-                        fontSize: "11px",
-                        color: "var(--color-primary)",
-                        cursor: "pointer",
-                        userSelect: "none",
-                        textAlign: "center",
-                        borderTop: "1px dashed var(--border-color)",
-                        margin: "0 8px",
                       }}
                     >
                       {favoritesExpanded ? "收起" : `展开更多 (${hiddenCount})`}
@@ -956,21 +947,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </ul>
                       {hiddenCount > 0 && (
                         <div
+                          className="expand-collapse-btn"
                           onClick={(e) => {
                             e.stopPropagation();
                             setExpandedProjects((prev) =>
                               prev.includes(projName) ? prev.filter((p) => p !== projName) : [...prev, projName]
                             );
-                          }}
-                          style={{
-                            padding: "4px 12px",
-                            fontSize: "11px",
-                            color: "var(--color-primary)",
-                            cursor: "pointer",
-                            userSelect: "none",
-                            textAlign: "center",
-                            borderTop: "1px dashed var(--border-color)",
-                            margin: "0 8px",
                           }}
                         >
                           {isExpanded ? "收起" : `展开更多 (${hiddenCount})`}
