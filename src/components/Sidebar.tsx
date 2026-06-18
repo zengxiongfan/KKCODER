@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ConfirmModal } from "./ConfirmModal";
 import {
@@ -294,20 +294,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
     isFavorited: boolean;
   } | null>(null);
 
+  // 调整右键菜单位置，防止超出视口
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!contextMenu && !projectContextMenu) {
+      setMenuPos(null);
+      return;
+    }
+    const el = contextMenuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = (contextMenu?.x ?? projectContextMenu?.x) ?? 0;
+    const y = (contextMenu?.y ?? projectContextMenu?.y) ?? 0;
+    let top = y;
+    let left = x;
+    if (top + rect.height > window.innerHeight - 8) {
+      top = window.innerHeight - rect.height - 8;
+    }
+    if (left + rect.width > window.innerWidth - 8) {
+      left = window.innerWidth - rect.width - 8;
+    }
+    if (top !== y || left !== x) {
+      setMenuPos({ top, left });
+    }
+  }, [contextMenu, projectContextMenu]);
+
   // 3c. 项目删除确认弹窗状态
   const [projectToDelete, setProjectToDelete] = useState<{
     projectName: string;
     sessionIds: string[];
   } | null>(null);
 
-  // 点击外部自动关闭右键菜单
+  // 点击外部自动关闭右键菜单（用 mousedown 确保标题栏拖拽前也能触发）
   useEffect(() => {
     const closeMenu = () => {
       setContextMenu(null);
       setProjectContextMenu(null);
     };
-    window.addEventListener("click", closeMenu);
-    return () => window.removeEventListener("click", closeMenu);
+    window.addEventListener("mousedown", closeMenu);
+    return () => window.removeEventListener("mousedown", closeMenu);
+  }, []);
+
+  // 滚动侧边栏时关闭右键菜单
+  useEffect(() => {
+    const sidebar = document.querySelector(".sidebar-scroll");
+    if (!sidebar) return;
+    const closeMenu = () => {
+      setContextMenu(null);
+      setProjectContextMenu(null);
+    };
+    sidebar.addEventListener("scroll", closeMenu);
+    return () => sidebar.removeEventListener("scroll", closeMenu);
   }, []);
 
   // 监听关闭侧边栏右键菜单的事件（由标签页触发）
@@ -1076,12 +1114,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* 9. 自定义高档白天右键上下文悬浮菜单 */}
       {contextMenu && (
-        <div 
+        <div
+          ref={contextMenuRef}
           className="context-menu"
-          style={{ 
-            top: contextMenu.y, 
-            left: contextMenu.x 
+          style={{
+            top: menuPos?.top ?? contextMenu.y,
+            left: menuPos?.left ?? contextMenu.x
           }}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
           <button 
@@ -1153,12 +1193,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* 项目右键上下文悬浮菜单 */}
       {projectContextMenu && (
-        <div 
+        <div
+          ref={contextMenuRef}
           className="context-menu"
-          style={{ 
-            top: projectContextMenu.y, 
-            left: projectContextMenu.x 
+          style={{
+            top: menuPos?.top ?? projectContextMenu.y,
+            left: menuPos?.left ?? projectContextMenu.x
           }}
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
           <button 
