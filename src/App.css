@@ -302,10 +302,6 @@ body {
   box-shadow: none;
 }
 
-.project-group.dragging {
-  opacity: 0 !important;
-}
-
 .project-header {
   padding: 5px 12px;
   background-color: transparent;

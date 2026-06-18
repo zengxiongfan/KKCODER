@@ -66,6 +66,11 @@ function App() {
 
   const appWindow = useMemo(() => getCurrentWindow(), []);
 
+  // 应用挂载完成后显示窗口，避免白屏闪烁
+  useEffect(() => {
+    appWindow.show().catch(() => {});
+  }, [appWindow]);
+
   const handleMinimize = () => {
     appWindow.minimize().catch((err) => log(`Failed to minimize: ${err}`));
   };

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ConfirmModal } from "./ConfirmModal";
 import {
   formatRelativeSessionActivityTime,
   sortSessionsByActivityDesc,
+  getSessionActivityTimestamp,
 } from "../utils/sessionActivity";
 
 export const ClaudeIcon: React.FC<{ size?: number; color?: string }> = ({ size = 18, color }) => (
@@ -129,16 +130,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     localStorage.setItem("kkcoder_favorite_projects", JSON.stringify(favoriteProjects));
   }, [favoriteProjects]);
 
-  // 拖动排序项目状态
-  const [draggingProject, setDraggingProject] = useState<string | null>(null);
-  const [regularProjectsOrder, setRegularProjectsOrder] = useState<string[]>(() => {
+  // 记住项目最后访问时间（打开会话时更新），用于项目排序
+  const [projectLastAccessed, setProjectLastAccessed] = useState<Record<string, number>>(() => {
     try {
-      const stored = localStorage.getItem("kkcoder_regular_projects_order");
-      return stored ? JSON.parse(stored) : [];
+      const stored = localStorage.getItem("kkcoder_project_last_accessed");
+      return stored ? JSON.parse(stored) : {};
     } catch (e) {
-      return [];
+      return {};
     }
   });
+
+  useEffect(() => {
+    localStorage.setItem("kkcoder_project_last_accessed", JSON.stringify(projectLastAccessed));
+  }, [projectLastAccessed]);
 
   // 归档区状态
   const [showArchive, setShowArchive] = useState<boolean>(false);
@@ -471,45 +475,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
       })
   );
 
-  // 按照收藏时间置顶项目，后收藏的在前面
-  const projectNames = Object.keys(projectsMap);
-  const favProjNames = favoriteProjects
-    .filter((fp) => projectNames.includes(fp.name))
-    .map((fp) => fp.name);
-  const regularProjNames = projectNames.filter((name) => !favProjNames.includes(name));
-
-  // 融合并比对本地保存的普通项目自定义排序，多退少补
-  const regularSortedProjNames = useMemo(() => {
-    const existingSavedOrder = regularProjectsOrder.filter((name) => regularProjNames.includes(name));
-    const newNames = regularProjNames.filter((name) => !existingSavedOrder.includes(name));
-    newNames.sort((left, right) => {
-      const leftSessions = projectsMap[left]?.sessions || [];
-      const rightSessions = projectsMap[right]?.sessions || [];
-      const leftEarliest = leftSessions.length > 0 ? Math.min(...leftSessions.map((s) => new Date(s.createdAt || 0).getTime())) : 0;
-      const rightEarliest = rightSessions.length > 0 ? Math.min(...rightSessions.map((s) => new Date(s.createdAt || 0).getTime())) : 0;
-      return leftEarliest - rightEarliest;
-    });
-    return [...existingSavedOrder, ...newNames];
-  }, [projectsMap, favoriteProjects, regularProjectsOrder]);
-
-  // 状态与 localStorage 同步
+  // 打开会话时，更新该项目的最后访问时间（用于置顶排序）
   useEffect(() => {
-    if (JSON.stringify(regularProjectsOrder) !== JSON.stringify(regularSortedProjNames)) {
-      setRegularProjectsOrder(regularSortedProjNames);
-      localStorage.setItem("kkcoder_regular_projects_order", JSON.stringify(regularSortedProjNames));
-    }
-  }, [regularSortedProjNames]);
+    if (!activeSessionId) return;
+    const session = sessions.find((s) => s.id === activeSessionId);
+    if (!session?.project) return;
+    setProjectLastAccessed((prev) => {
+      if (prev[session.project] && Date.now() - prev[session.project] < 1000) return prev;
+      return { ...prev, [session.project]: Date.now() };
+    });
+  }, [activeSessionId, sessions]);
 
-  // 当前活跃会话所属项目置顶（优先级：收藏项目 > 当前项目 > 普通项目）
-  const activeProjectName = sessions.find((s) => s.id === activeSessionId)?.project;
-  const activeIsFavorited = activeProjectName ? favProjNames.includes(activeProjectName) : false;
-  const pinnedRegularProjects = (() => {
-    if (!activeProjectName || activeIsFavorited) return regularSortedProjNames;
-    if (!regularSortedProjNames.includes(activeProjectName)) return regularSortedProjNames;
-    return [activeProjectName, ...regularSortedProjNames.filter((name) => name !== activeProjectName)];
-  })();
+  // 按最近访问时间 + 最近活跃会话自动排序项目
+  const projectNames = Object.keys(projectsMap);
+  const sortByAccessAndActivity = (names: string[]) => {
+    return [...names].sort((a, b) => {
+      const aAccess = projectLastAccessed[a] || 0;
+      const bAccess = projectLastAccessed[b] || 0;
+      if (aAccess !== bAccess) return bAccess - aAccess;
+      // 回退到会话活跃时间
+      const aSessions = projectsMap[a]?.sessions || [];
+      const bSessions = projectsMap[b]?.sessions || [];
+      const aTime = Math.max(0, ...aSessions.map((s) => getSessionActivityTimestamp(s)));
+      const bTime = Math.max(0, ...bSessions.map((s) => getSessionActivityTimestamp(s)));
+      return bTime - aTime;
+    });
+  };
+  const favProjNames = useMemo(() => {
+    const names = favoriteProjects
+      .filter((fp) => projectNames.includes(fp.name))
+      .map((fp) => fp.name);
+    return sortByAccessAndActivity(names);
+  }, [favoriteProjects, projectsMap, projectNames, projectLastAccessed]);
+  const regularProjNames = projectNames.filter((name) => !favProjNames.includes(name));
+  const regularSortedProjNames = useMemo(() => {
+    return sortByAccessAndActivity(regularProjNames);
+  }, [regularProjNames, projectsMap, projectLastAccessed]);
 
-  const sortedProjectNames = [...favProjNames, ...pinnedRegularProjects];
+  const sortedProjectNames = [...favProjNames, ...regularSortedProjNames];
 
   // 6. 行内编辑操作
   const startEditing = (session: Session) => {
@@ -546,114 +549,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     window.dispatchEvent(new CustomEvent("close-tab-context-menu"));
   };
 
-  // 🖱️ 项目列表拖拽排序与垂直轨道滑动 FLIP 动画
-  const lastProjectPositions = useRef<Record<string, number>>({});
-  useLayoutEffect(() => {
-    const projectElements = document.querySelectorAll(".project-group");
-    const newPositions: Record<string, number> = {};
-
-    projectElements.forEach((el) => {
-      const name = el.getAttribute("data-project-name");
-      const htmlEl = el as HTMLElement;
-      if (name) {
-        newPositions[name] = htmlEl.getBoundingClientRect().top;
-        const oldTop = lastProjectPositions.current[name];
-
-        // 仅对已经存在且位置发生变化的常规或收藏项目组做过渡动画（跳过当前拖拽的项目）
-        if (oldTop !== undefined && oldTop !== newPositions[name] && !htmlEl.classList.contains("dragging")) {
-          const deltaY = oldTop - newPositions[name];
-
-          htmlEl.style.transition = "none";
-          htmlEl.style.transform = `translate3d(0, ${deltaY}px, 0)`;
-
-          htmlEl.offsetHeight; // reflow
-
-          htmlEl.style.transition = "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1)";
-          htmlEl.style.transform = "translate3d(0, 0, 0)";
-
-          const cleanup = (e: TransitionEvent) => {
-            if (e.propertyName === "transform") {
-              htmlEl.style.transition = "";
-              htmlEl.style.transform = "";
-              htmlEl.removeEventListener("transitionend", cleanup);
-            }
-          };
-          htmlEl.addEventListener("transitionend", cleanup);
-        }
-      }
-    });
-
-    lastProjectPositions.current = newPositions;
-  }, [sortedProjectNames]);
-
-  const handleProjDragStart = (e: React.DragEvent, projectName: string) => {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", projectName);
-    setTimeout(() => {
-      setDraggingProject(projectName);
-    }, 0);
-  };
-
-  const handleProjDragOver = (e: React.DragEvent, targetName: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-
-    if (!draggingProject || draggingProject === targetName) return;
-
-    const isSrcFavorite = favoriteProjects.some((p) => p.name === draggingProject);
-    const isTgtFavorite = favoriteProjects.some((p) => p.name === targetName);
-
-    // 只能在同一大组（收藏置顶组内，或常规普通组内）拖拽重排
-    if (isSrcFavorite !== isTgtFavorite) return;
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const midpoint = rect.top + rect.height / 2;
-    const clientY = e.clientY;
-
-    if (isSrcFavorite) {
-      const list = [...favoriteProjects];
-      const srcIdx = list.findIndex((p) => p.name === draggingProject);
-      const tgtIdx = list.findIndex((p) => p.name === targetName);
-
-      if (srcIdx !== -1 && tgtIdx !== -1) {
-        if (srcIdx > tgtIdx && clientY < midpoint) {
-          const item = list[srcIdx];
-          list.splice(srcIdx, 1);
-          list.splice(tgtIdx, 0, item);
-          setFavoriteProjects(list);
-        } else if (srcIdx < tgtIdx && clientY > midpoint) {
-          const item = list[srcIdx];
-          list.splice(srcIdx, 1);
-          list.splice(tgtIdx, 0, item);
-          setFavoriteProjects(list);
-        }
-      }
-    } else {
-      const list = [...regularProjectsOrder];
-      const srcIdx = list.indexOf(draggingProject);
-      const tgtIdx = list.indexOf(targetName);
-
-      if (srcIdx !== -1 && tgtIdx !== -1) {
-        if (srcIdx > tgtIdx && clientY < midpoint) {
-          const item = list[srcIdx];
-          list.splice(srcIdx, 1);
-          list.splice(tgtIdx, 0, item);
-          setRegularProjectsOrder(list);
-          localStorage.setItem("kkcoder_regular_projects_order", JSON.stringify(list));
-        } else if (srcIdx < tgtIdx && clientY > midpoint) {
-          const item = list[srcIdx];
-          list.splice(srcIdx, 1);
-          list.splice(tgtIdx, 0, item);
-          setRegularProjectsOrder(list);
-          localStorage.setItem("kkcoder_regular_projects_order", JSON.stringify(list));
-        }
-      }
-    }
-  };
-
-  const handleProjDragEnd = () => {
-    setDraggingProject(null);
-  };
 
   // 8. 统一会话行渲染函数 (复用在置顶收藏组和常规项目树中)
   const renderSessionRow = (session: Session) => {
@@ -966,15 +861,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div
                 key={projName}
                 data-project-name={projName}
-                className={`project-group ${draggingProject === projName ? "dragging" : ""}`}
+                className="project-group"
               >
                 {/* 项目层级标题 */}
-                <div 
+                <div
                   className="project-header"
-                  draggable={true}
-                  onDragStart={(e) => handleProjDragStart(e, projName)}
-                  onDragOver={(e) => handleProjDragOver(e, projName)}
-                  onDragEnd={handleProjDragEnd}
                   onClick={() => toggleProject(projName)}
                   onContextMenu={(e) => handleProjectContextMenu(e, projName, proj.path, proj.sessions, isProjectFavorited)}
                   style={{ cursor: "pointer", userSelect: "none" }}

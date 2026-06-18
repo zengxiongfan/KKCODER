@@ -5,6 +5,27 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>KKCoder</title>
+    <script>
+      // 根据用户选择的主题提前设置背景色，避免白屏闪烁
+      (function () {
+        var themes = {
+          "dark-blue":   { bg: "#090d16", text: "#f8fafc" },
+          "dark-purple": { bg: "#0c0a12", text: "#f5f3ff" },
+          "dark-zinc":   { bg: "#0c0b0a", text: "#fafaf9" },
+          "light-blue":  { bg: "#f0f4ff", text: "#1e293b" },
+          "light-orange":{ bg: "#fdf8f3", text: "#1e293b" },
+          "light-premium":{ bg: "#fcfdfd", text: "#1e293b" }
+        };
+        var theme = "light-premium";
+        try { theme = localStorage.getItem("kkcoder_setting_theme") || "light-premium"; } catch (e) {}
+        if (theme === "auto") {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark-zinc" : "light-premium";
+        }
+        var t = themes[theme] || themes["light-premium"];
+        document.documentElement.style.backgroundColor = t.bg;
+        document.documentElement.style.color = t.text;
+      })();
+    </script>
   </head>
 
   <body>
