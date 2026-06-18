@@ -103,6 +103,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   // 1. 折叠项目列表的状态
   const [collapsedProjects, setCollapsedProjects] = useState<string[]>([]);
+  // 展开更多会话的状态（默认只显示前5条）
+  const [expandedProjects, setExpandedProjects] = useState<string[]>([]);
+  // 收藏区展开更多会话
+  const [favoritesExpanded, setFavoritesExpanded] = useState<boolean>(false);
   // 回收站与确认删除 Modal 状态
   const [showTrashModal, setShowTrashModal] = useState<boolean>(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
@@ -837,11 +841,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </div>
             
-            {!favoritesCollapsed && (
-              <ul className="session-list" style={{ padding: "2px" }}>
-                {favoriteSessions.map((session) => renderSessionRow(session))}
-              </ul>
-            )}
+            {!favoritesCollapsed && (() => {
+              const visibleSessions = favoritesExpanded ? favoriteSessions : favoriteSessions.slice(0, 5);
+              const hiddenCount = favoriteSessions.length - 5;
+              return (
+                <>
+                  <ul className="session-list" style={{ padding: "2px" }}>
+                    {visibleSessions.map((session) => renderSessionRow(session))}
+                  </ul>
+                  {hiddenCount > 0 && (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFavoritesExpanded(!favoritesExpanded);
+                      }}
+                      style={{
+                        padding: "4px 12px",
+                        fontSize: "11px",
+                        color: "var(--color-primary)",
+                        cursor: "pointer",
+                        userSelect: "none",
+                        textAlign: "center",
+                        borderTop: "1px dashed var(--border-color)",
+                        margin: "0 8px",
+                      }}
+                    >
+                      {favoritesExpanded ? "收起" : `展开更多 (${hiddenCount})`}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
             <div className="favorite-divider" style={{ borderBottom: "1px dashed var(--border-color)", margin: "8px 4px 4px 4px" }} />
           </div>
         )}
@@ -915,11 +945,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 
                 {/* 会话列表 */}
-                {!isCollapsed && (
-                  <ul className="session-list" style={{ padding: "2px" }}>
-                    {proj.sessions.map((session) => renderSessionRow(session))}
-                  </ul>
-                )}
+                {!isCollapsed && (() => {
+                  const isExpanded = expandedProjects.includes(projName);
+                  const visibleSessions = isExpanded ? proj.sessions : proj.sessions.slice(0, 5);
+                  const hiddenCount = proj.sessions.length - 5;
+                  return (
+                    <>
+                      <ul className="session-list" style={{ padding: "2px" }}>
+                        {visibleSessions.map((session) => renderSessionRow(session))}
+                      </ul>
+                      {hiddenCount > 0 && (
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedProjects((prev) =>
+                              prev.includes(projName) ? prev.filter((p) => p !== projName) : [...prev, projName]
+                            );
+                          }}
+                          style={{
+                            padding: "4px 12px",
+                            fontSize: "11px",
+                            color: "var(--color-primary)",
+                            cursor: "pointer",
+                            userSelect: "none",
+                            textAlign: "center",
+                            borderTop: "1px dashed var(--border-color)",
+                            margin: "0 8px",
+                          }}
+                        >
+                          {isExpanded ? "收起" : `展开更多 (${hiddenCount})`}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             );
           })
