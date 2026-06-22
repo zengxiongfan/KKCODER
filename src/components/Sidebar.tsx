@@ -651,14 +651,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", flex: 1, minWidth: 0 }}>
-              <span 
+              <span
                 className={`session-name-text ${isGlowing ? "glowing-text" : ""}`}
-                style={{ 
-                  textOverflow: "ellipsis", 
-                  overflow: "hidden", 
+                style={{
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
                   whiteSpace: "nowrap",
                   fontSize: "12.5px"
                 }}
+                title={session.name}
               >
                 {session.name}
               </span>
@@ -1025,7 +1026,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                         </svg>
                       </span>
-                      <span>{projName}</span>
+                      <span title={proj.path}>{projName}</span>
                     </span>
                     {isProjectFavorited && (
                       <span className="project-star-badge" style={{ color: "#f59e0b", marginLeft: "4px" }}>★</span>
