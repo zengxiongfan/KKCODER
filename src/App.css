@@ -695,6 +695,10 @@ body {
   font-weight: 600;
   box-shadow: 0 -2px 6px rgba(0,0,0,0.03);
   position: relative;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  z-index: 1;
+  overflow: hidden;
 }
 
 .tab.active::after {
@@ -707,6 +711,8 @@ body {
   background-color: var(--color-primary);
   border-top-left-radius: 6px;
   border-top-right-radius: 6px;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .tab.dragging {
