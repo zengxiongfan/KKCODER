@@ -291,7 +291,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         }
 
         // 2. 匹配 Windows 路径 (形如 D:\MyCode\KKCODER 或 D:\MyCode\KKCODER\主题样式_spec.md)
-        const pathRegex = /[a-zA-Z]:\\[^:?"*|<> \t\r\n]+/g;
+        // 有扩展名时：扩展名后遇到中文括号停止（解决 Claude Code 输出文件大小问题）
+        // 无扩展名时：遇到中文括号停止
+        const pathRegex = /[a-zA-Z]:\\(?:[^:?"*|<> \t\r\n（）]*\.[^:?"*|<> \t\r\n（）]*|[^\s:?"*|<>（）]+)/g;
         while ((match = pathRegex.exec(lineStr)) !== null) {
           const matchedText = match[0];
           const startStrIdx = match.index;
