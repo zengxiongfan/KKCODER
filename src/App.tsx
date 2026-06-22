@@ -2070,13 +2070,14 @@ function App() {
                         autoFocus
                       />
                     ) : (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", flex: 1, minWidth: 0 }}>
                         {sessionBusy[s.id] ? (
                           <span className="tab-loading-spinner" title="思考中..." />
                         ) : (
                           s.type === "claude" ? <ClaudeIcon size={14} color="#D97757" /> : <PiIcon size={14} color="var(--color-green)" />
                         )}
-                        <span className="tab-title-text" title={s.isTemp ? s.name : `${s.name} (${s.project})`}>{s.isTemp ? s.name : `${s.name} (${s.project})`}</span>
+                        <span className="tab-title-text" title={s.name}>{s.name}</span>
+                        {s.project && !s.isTemp && <span className="tab-project-tag" title={s.project}>{s.project}</span>}
                       </span>
                     )}
                     <span
