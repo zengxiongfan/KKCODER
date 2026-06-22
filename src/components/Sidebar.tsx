@@ -703,6 +703,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
+  const isFavoritesExist = favoriteSessions.length > 0;
+  const isAllProjectsCollapsed = sortedProjectNames.every((p) => collapsedProjects.includes(p));
+  const isFavoritesCollapsed = isFavoritesExist ? favoritesCollapsed : true;
+  const allCollapsed = isAllProjectsCollapsed && isFavoritesCollapsed;
+
+  const toggleCollapseAll = () => {
+    if (sortedProjectNames.length === 0 && favoriteSessions.length === 0) return;
+    
+    if (allCollapsed) {
+      // 展开全部
+      setCollapsedProjects([]);
+      if (isFavoritesExist) {
+        setFavoritesCollapsed(false);
+      }
+    } else {
+      // 收起全部
+      setCollapsedProjects(sortedProjectNames);
+      if (isFavoritesExist) {
+        setFavoritesCollapsed(true);
+      }
+    }
+  };
+
   return (
     <aside className="sidebar-aside" style={width !== undefined ? { width: `${width}px` } : undefined}>
       {/* 新建 AI 会话头部区域 */}
@@ -858,7 +881,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* 滚动会话树列表 */}
       <div className="sidebar-scroll">
-        <div className="section-title">会话管理</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingRight: "12px", marginBottom: "8px" }}>
+          <div className="section-title" style={{ marginBottom: 0 }}>会话管理</div>
+          <button 
+            className="collapse-all-btn"
+            onClick={toggleCollapseAll}
+            disabled={sortedProjectNames.length === 0 && favoriteSessions.length === 0}
+            title={allCollapsed ? "展开全部" : "收起全部"}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-secondary)",
+              cursor: (sortedProjectNames.length === 0 && favoriteSessions.length === 0) ? "not-allowed" : "pointer",
+              padding: "2px 4px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: "var(--radius-sm)",
+              transition: "var(--transition-smooth)",
+              opacity: (sortedProjectNames.length === 0 && favoriteSessions.length === 0) ? 0.3 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (sortedProjectNames.length > 0 || favoriteSessions.length > 0) {
+                e.currentTarget.style.color = "var(--text-primary)";
+                e.currentTarget.style.backgroundColor = "var(--bg-hover-item)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-secondary)";
+              e.currentTarget.style.backgroundColor = "transparent";
+            }}
+          >
+            {allCollapsed ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m7 13 5 5 5-5"/>
+                <path d="m7 6 5 5 5-5"/>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m17 11-5-5-5 5"/>
+                <path d="m17 18-5-5-5 5"/>
+              </svg>
+            )}
+          </button>
+        </div>
 
         {/* 置顶 “⭐ 收藏” 分组 (如果有被收藏的会话) */}
         {favoriteSessions.length > 0 && (

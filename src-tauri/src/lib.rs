@@ -5,6 +5,8 @@ use tauri::{State, AppHandle, Emitter};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
 use std::io::Write;
 
+mod remote;
+
 // 极其可靠的本地调试文件日志输出器，自动写入 kkcoder_debug.log 以便于闪退后追溯
 fn log_to_file(message: &str) {
     use std::fs::OpenOptions;
@@ -21,15 +23,24 @@ fn log_to_file(message: &str) {
     }
 }
 
-struct ActiveSession {
+pub struct ActiveSession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn std::io::Write + Send>,
+    writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     spawn_token: u64,
 }
 
-#[derive(Default)]
 pub struct PtyManager {
-    sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
+    pub sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
+    pub session_registry: Option<Arc<remote::state::SessionRegistry>>,
+}
+
+impl Default for PtyManager {
+    fn default() -> Self {
+        Self {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            session_registry: None,
+        }
+    }
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -155,6 +166,27 @@ fn initialize_database() -> Result<(), rusqlite::Error> {
         "ALTER TABLE archived_projects ADD COLUMN sessions_data TEXT DEFAULT '[]'",
         [],
     );
+
+    // 远程访问：已配对设备表
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS paired_devices (
+            device_id TEXT PRIMARY KEY,
+            device_name TEXT NOT NULL,
+            token TEXT NOT NULL UNIQUE,
+            paired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+
+    // 远程访问：配置表
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS remote_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
 
     log_to_file("initialize_database completed successfully.");
     Ok(())
@@ -1003,6 +1035,9 @@ fn spawn_terminal(
     })?;
     log_to_file("Initial command written and flushed.");
 
+    // 包装 writer 为 Arc<Mutex<>> 以便远程输入共享
+    let writer = Arc::new(Mutex::new(writer));
+
     // 如果是重新唤起已有的克劳德会话，则延时 2.5 秒等 Claude Banner 加载后，自动键入 /resume 还原会话
     if is_reopen && agent_type == "claude" {
         log_to_file("is_reopen is true for Claude: spawning background thread for `/resume` writing...");
@@ -1024,14 +1059,17 @@ fn spawn_terminal(
 
                 let resume_cmd = format!("/resume {}", agent_session_id_clone);
                 log_to_file(&format!("Background thread: writing resume cmd: {:?}", resume_cmd));
-                session.writer.write_all(resume_cmd.as_bytes()).ok();
-                session.writer.flush().ok();
+                {
+                    let mut w = session.writer.lock().unwrap();
+                    w.write_all(resume_cmd.as_bytes()).ok();
+                    w.flush().ok();
+                }
                 log_to_file("Background thread: resume cmd written. Dropping lock and sleeping 500ms...");
-                
+
                 // 释放锁，防止阻塞其他线程
                 drop(sessions);
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                
+
                 // 重新获取锁并触发一次回车
                 log_to_file("Background thread: re-acquiring lock to trigger Enter...");
                 let mut sessions = sessions_clone.lock().unwrap();
@@ -1040,8 +1078,9 @@ fn spawn_terminal(
                         log_to_file("Stale spawn token during Enter key trigger. Safely skipping Enter.");
                         return;
                     }
-                    session.writer.write_all(b"\r\n").ok();
-                    session.writer.flush().ok();
+                    let mut w = session.writer.lock().unwrap();
+                    w.write_all(b"\r\n").ok();
+                    w.flush().ok();
                     log_to_file("Background thread: Enter key sent!");
                 } else {
                     log_to_file("Background thread error during Enter send: session lost!");
@@ -1069,8 +1108,11 @@ fn spawn_terminal(
                 }
 
                 log_to_file("Background thread: writing /session cmd...");
-                session.writer.write_all(b"/session\r\n").ok();
-                session.writer.flush().ok();
+                {
+                    let mut w = session.writer.lock().unwrap();
+                    w.write_all(b"/session\r\n").ok();
+                    w.flush().ok();
+                }
                 log_to_file("Background thread: /session cmd written!");
             }
         });
@@ -1079,38 +1121,108 @@ fn spawn_terminal(
     let session_id_clone = session_id.clone();
     let app_handle_clone = app_handle.clone();
     let sessions_map_clone = state.sessions.clone();
-    
+    let registry_clone = state.session_registry.clone();
+
+    // 远程访问：注册到 SessionRegistry（broadcast 通道同步输出，输入通过 Tauri write_to_terminal 命令写入）
+    let remote_output_tx = if let Some(ref registry) = state.session_registry {
+        let (output_tx, _) = tokio::sync::broadcast::channel(256);
+        let replay = Arc::new(remote::state::ReplayBuffer::new(3000));
+        let status = Arc::new(remote::state::AtomicSessionStatus::new(
+            remote::state::SessionStatus::Idle,
+        ));
+
+        let handle = Arc::new(remote::state::SessionHandle {
+            input_tx: {
+                // 创建一个虚拟通道（实际输入通过 pty_writer 直接写入）
+                let (tx, _rx) = tokio::sync::mpsc::channel(1);
+                tx
+            },
+            output_tx: output_tx.clone(),
+            status: status.clone(),
+            replay: replay.clone(),
+            session_name: String::new(),
+            pty_writer: Some(writer.clone()),
+        });
+
+        registry.insert(session_id.clone(), handle);
+        Some(output_tx)
+    } else {
+        None
+    };
+
     log_to_file("Spawning PTY reader listener thread...");
     std::thread::spawn(move || {
         log_to_file("PTY reader listener thread spawned.");
         let mut reader = reader;
         let mut buffer = [0u8; 4096];
+        let mut seq: u64 = 0;
         while let Ok(n) = reader.read(&mut buffer) {
-            if n == 0 { 
+            if n == 0 {
                 log_to_file("PTY reader thread: read EOF (0 bytes). Exiting reader loop.");
-                break; 
+                break;
             }
             let data = String::from_utf8_lossy(&buffer[..n]).to_string();
-            app_handle_clone.emit("pty-output", PtyOutputPayload {
-                session_id: session_id_clone.clone(),
-                data,
-            }).ok();
+
+            // 发送到前端
+            app_handle_clone
+                .emit(
+                    "pty-output",
+                    PtyOutputPayload {
+                        session_id: session_id_clone.clone(),
+                        data: data.clone(),
+                    },
+                )
+                .ok();
+
+            // 发送到远程广播通道（带序号和时间戳，用于断线重连）
+            if let Some(ref output_tx) = remote_output_tx {
+                seq += 1;
+                let frame = remote::state::OutputFrame {
+                    seq,
+                    session_id: session_id_clone.clone(),
+                    data,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                };
+                // 存入 replay buffer
+                if let Some(ref registry) = registry_clone {
+                    if let Some(handle) = registry.get(&session_id_clone) {
+                        handle.replay.push(frame.clone());
+                    }
+                }
+                let _ = output_tx.send(frame);
+            }
         }
         log_to_file("PTY reader listener thread exited.");
         // 当进程退出时，自动从 sessions map 中清理，以防下一次无法重新拉起
         let mut sessions = sessions_map_clone.lock().unwrap();
         sessions.remove(&session_id_clone);
-        log_to_file(&format!("Session {} cleaned up from sessions map after PTY EOF.", session_id_clone));
+        log_to_file(&format!(
+            "Session {} cleaned up from sessions map after PTY EOF.",
+            session_id_clone
+        ));
     });
 
     log_to_file("Locking sessions map to insert active session...");
     let mut sessions = state.sessions.lock().unwrap();
-    sessions.insert(session_id, ActiveSession {
-        master,
-        writer,
-        spawn_token,
-    });
-    log_to_file(&format!("Session inserted into sessions map with spawn_token {}. spawn_terminal finished successfully!", spawn_token));
+    sessions.insert(
+        session_id.clone(),
+        ActiveSession {
+            master,
+            writer: writer.clone(),
+            spawn_token,
+        },
+    );
+
+    // 将 writer 注册到远程状态（用于远程 WebSocket 输入写入）
+    // 通过 SessionRegistry 的 SessionHandle 存储 writer 引用
+    // 实际上，远程输入通过共享的 writer Arc<Mutex<>> 直接写入
+    log_to_file(&format!(
+        "Session inserted into sessions map with spawn_token {}. spawn_terminal finished successfully!",
+        spawn_token
+    ));
 
     Ok(())
 }
@@ -1122,10 +1234,11 @@ fn write_to_terminal(
     data: String,
     state: State<'_, PtyManager>,
 ) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
-    if let Some(session) = sessions.get_mut(&session_id) {
-        session.writer.write_all(data.as_bytes()).map_err(|e: std::io::Error| e.to_string())?;
-        session.writer.flush().map_err(|e: std::io::Error| e.to_string())?;
+    let sessions = state.sessions.lock().unwrap();
+    if let Some(session) = sessions.get(&session_id) {
+        let mut writer = session.writer.lock().unwrap();
+        writer.write_all(data.as_bytes()).map_err(|e: std::io::Error| e.to_string())?;
+        writer.flush().map_err(|e: std::io::Error| e.to_string())?;
         Ok(())
     } else {
         Err(format!("会话 {} 不存在", session_id))
@@ -2572,14 +2685,388 @@ fn open_in_file_manager(path: String) -> Result<(), String> {
 }
 
 
+// ==================== 远程访问 Tauri Commands ====================
+
+#[derive(serde::Serialize)]
+struct RemoteConfigDTO {
+    enabled: bool,
+    port: u16,
+    listen_mode: String,
+    public_url: String,
+    frp_server_addr: String,
+    frp_server_port: u16,
+    frp_token: String,
+    frp_use_tls: bool,
+}
+
+/// 获取远程访问配置
+#[tauri::command]
+fn get_remote_config() -> Result<RemoteConfigDTO, String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+
+    let get_val = |key: &str, default: &str| -> String {
+        conn.query_row(
+            "SELECT value FROM remote_config WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| default.to_string())
+    };
+
+    Ok(RemoteConfigDTO {
+        enabled: get_val("enabled", "false") == "true",
+        port: get_val("port", "9527").parse().unwrap_or(9527),
+        listen_mode: get_val("listen_mode", "localhost"),
+        public_url: get_val("public_url", ""),
+        frp_server_addr: get_val("frp_server_addr", ""),
+        frp_server_port: get_val("frp_server_port", "7000").parse().unwrap_or(7000),
+        frp_token: get_val("frp_token", ""),
+        frp_use_tls: get_val("frp_use_tls", "false") == "true",
+    })
+}
+
+/// 设置远程访问启用状态
+#[tauri::command]
+fn set_remote_enabled(enabled: bool) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('enabled', ?1)",
+        [if enabled { "true" } else { "false" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 设置监听端口
+#[tauri::command]
+fn set_remote_port(port: u16) -> Result<(), String> {
+    if port < 1024 {
+        return Err("端口号不能小于 1024".to_string());
+    }
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('port', ?1)",
+        [port.to_string()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 设置监听模式：localhost 或 0.0.0.0
+#[tauri::command]
+fn set_listen_mode(mode: String) -> Result<(), String> {
+    if mode != "localhost" && mode != "all" {
+        return Err("监听模式必须是 localhost 或 all".to_string());
+    }
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('listen_mode', ?1)",
+        [&mode],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 设置公网访问地址（用于移动端连接）
+#[tauri::command]
+fn set_public_url(url: String) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('public_url', ?1)",
+        [&url],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 测试公网地址连通性
+#[tauri::command]
+async fn test_public_url(url: String) -> Result<bool, String> {
+    let url = url.trim_end_matches('/');
+    // 自动补全协议前缀
+    let url = if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("http://{}", url)
+    };
+    let test_url = format!("{}/api/status", url);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.get(&test_url).send().await {
+        Ok(resp) => Ok(resp.status().is_success()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// 生成配对 PIN
+#[tauri::command]
+async fn generate_pairing_pin(
+    _state: State<'_, PtyManager>,
+) -> Result<String, String> {
+    let pin = remote::auth::generate_pin();
+    let expiry = remote::auth::pin_expiry();
+    let expiry_millis = expiry
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .to_string();
+
+    let db_path = get_db_path();
+    let pin_clone = pin.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('pairing_pin', ?1)",
+            [&pin_clone],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('pin_expires_at', ?1)",
+            [&expiry_millis],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(pin)
+}
+
+/// 获取已配对设备列表
+#[tauri::command]
+fn get_paired_devices() -> Result<Vec<remote::handlers::DeviceDTO>, String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT device_id, device_name, paired_at, last_seen FROM paired_devices ORDER BY paired_at DESC")
+        .map_err(|e| e.to_string())?;
+
+    let devices = stmt
+        .query_map([], |row| {
+            Ok(remote::handlers::DeviceDTO {
+                device_id: row.get(0)?,
+                device_name: row.get(1)?,
+                paired_at: row.get(2)?,
+                last_seen: row.get(3)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(devices)
+}
+
+/// 吊销设备
+#[tauri::command]
+fn revoke_device(device_id: String) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM paired_devices WHERE device_id = ?1",
+        [&device_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 获取服务器状态
+#[tauri::command]
+fn get_server_status() -> Result<remote::handlers::ServerStatusDTO, String> {
+    // 简化版本：从数据库读取配置
+    let config = get_remote_config()?;
+    Ok(remote::handlers::ServerStatusDTO {
+        running: config.enabled,
+        port: config.port,
+        active_sessions: 0, // 需要从远程状态获取
+        paired_devices: 0,
+    })
+}
+
+/// 设置 frp 服务器地址
+#[tauri::command]
+fn set_frp_server_addr(addr: String) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('frp_server_addr', ?1)",
+        [&addr],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 设置 frp 服务器端口
+#[tauri::command]
+fn set_frp_server_port(port: u16) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('frp_server_port', ?1)",
+        [port.to_string()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 设置 frp token
+#[tauri::command]
+fn set_frp_token(token: String) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('frp_token', ?1)",
+        [&token],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 设置 frp TLS 开关
+#[tauri::command]
+fn set_frp_use_tls(use_tls: bool) -> Result<(), String> {
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR REPLACE INTO remote_config (key, value) VALUES ('frp_use_tls', ?1)",
+        [if use_tls { "true" } else { "false" }],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 获取本地局域网 IP 地址
+#[tauri::command]
+fn get_local_ip() -> Result<String, String> {
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?;
+    socket.connect("8.8.8.8:80").map_err(|e| e.to_string())?;
+    let addr = socket.local_addr().map_err(|e| e.to_string())?;
+    Ok(addr.ip().to_string())
+}
+
+/// 启动 frp 客户端
+#[tauri::command]
+fn start_frp(
+    server_addr: String,
+    server_port: u16,
+    token: String,
+    local_port: u16,
+    use_tls: bool,
+    state: State<'_, remote::frp::FrpManager>,
+) -> Result<(), String> {
+    state.start(&server_addr, server_port, &token, local_port, use_tls)
+}
+
+/// 停止 frp 客户端
+#[tauri::command]
+fn stop_frp(
+    state: State<'_, remote::frp::FrpManager>,
+) -> Result<(), String> {
+    state.stop()
+}
+
+/// 获取 frp 运行状态
+#[tauri::command]
+fn get_frp_status(
+    state: State<'_, remote::frp::FrpManager>,
+) -> Result<remote::frp::FrpStatusDTO, String> {
+    Ok(state.get_status())
+}
+
 pub fn run() {
     // 启动时初始化数据库表
     initialize_database().expect("Failed to initialize SQLite database");
 
+    // 初始化远程访问状态
+    let session_registry = Arc::new(remote::state::SessionRegistry::new());
+    let db_path = get_db_path();
+
+    // 从数据库加载配对设备到内存缓存
+    let paired_devices = {
+        let devices = dashmap::DashMap::new();
+        if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT device_id, device_name, token, paired_at, last_seen FROM paired_devices",
+            ) {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    let token: String = row.get(2)?;
+                    Ok((token, remote::state::DeviceInfo {
+                        device_id: row.get(0)?,
+                        device_name: row.get(1)?,
+                        paired_at: row.get(3)?,
+                        last_seen: row.get(4)?,
+                    }))
+                }) {
+                    for row in rows.flatten() {
+                        devices.insert(row.0, row.1);
+                    }
+                }
+            }
+        }
+        devices
+    };
+
+    // 从数据库加载远程配置
+    let remote_config = {
+        let get_val = |key: &str, default: &str| -> String {
+            rusqlite::Connection::open(&db_path)
+                .ok()
+                .and_then(|conn| {
+                    conn.query_row(
+                        "SELECT value FROM remote_config WHERE key = ?1",
+                        [key],
+                        |row| row.get(0),
+                    )
+                    .ok()
+                })
+                .unwrap_or_else(|| default.to_string())
+        };
+
+        remote::state::RemoteConfig {
+            enabled: get_val("enabled", "false") == "true",
+            port: get_val("port", "9527").parse().unwrap_or(9527),
+            listen_mode: get_val("listen_mode", "localhost"),
+            pairing_pin: None,
+            pin_expires_at: None,
+        }
+    };
+
+    let remote_state = Arc::new(remote::state::RemoteServerState {
+        session_registry: session_registry.clone(),
+        config: Arc::new(tokio::sync::Mutex::new(remote_config)),
+        paired_devices: Arc::new(paired_devices),
+        db_path: db_path.clone(),
+        spawn_requests: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+    });
+
+    // 启动远程访问服务器（在独立线程中）
+    let remote_state_for_server = remote_state.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = rt.block_on(remote::server::start_remote_server(remote_state_for_server));
+    });
+
+    // 创建 PtyManager 并注入 session_registry
+    let mut pty_manager = PtyManager::default();
+    pty_manager.session_registry = Some(session_registry.clone());
+
     tauri::Builder::default()
-        .manage(PtyManager::default())
+        .manage(pty_manager)
+        .manage(remote::frp::FrpManager::new())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::Manager;
             
             // 1. 获取默认窗口图标
@@ -2630,6 +3117,61 @@ pub fn run() {
                     })
                     .build(app)?;
             }
+
+            // 启动远程 spawn 请求轮询任务
+            let remote_state_poll = remote_state.clone();
+            let pty_mgr_ref = app.state::<PtyManager>();
+            let pty_sessions_for_spawn = pty_mgr_ref.sessions.clone();
+            let _registry_for_spawn = pty_mgr_ref.session_registry.clone();
+            let app_handle_for_spawn = app.handle().clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                rt.block_on(async {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        let mut requests = remote_state_poll.spawn_requests.lock().await;
+                        if requests.is_empty() {
+                            continue;
+                        }
+                        let pending: Vec<_> = requests.drain(..).collect();
+                        drop(requests);
+
+                        for req in pending {
+                            // 检查是否已在运行
+                            let already_running = pty_sessions_for_spawn
+                                .lock()
+                                .unwrap()
+                                .contains_key(&req.session_id);
+                            if already_running {
+                                continue;
+                            }
+
+                            // 调用 spawn_terminal 逻辑
+                            // 由于 spawn_terminal 是 Tauri command，这里直接执行 PTY 逻辑
+                            log_to_file(&format!(
+                                "Remote spawn request: session={}, dir={}, type={}",
+                                req.session_id, req.directory, req.agent_type
+                            ));
+                            // 实际启动需要调用 spawn_terminal，但这里无法直接调用
+                            // 改为通知前端执行
+                            let _ = app_handle_for_spawn.emit(
+                                "remote-spawn-request",
+                                serde_json::json!({
+                                    "session_id": req.session_id,
+                                    "directory": req.directory,
+                                    "agent_type": req.agent_type,
+                                    "agent_session_id": req.agent_session_id,
+                                    "is_reopen": req.is_reopen,
+                                }),
+                            );
+                        }
+                    }
+                });
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2674,7 +3216,25 @@ pub fn run() {
             open_file_in_system,
             open_in_file_manager,
             select_ccswitch_file,
-            launch_ccswitch
+            launch_ccswitch,
+            get_remote_config,
+            set_remote_enabled,
+            set_remote_port,
+            set_listen_mode,
+            set_public_url,
+            test_public_url,
+            generate_pairing_pin,
+            get_paired_devices,
+            revoke_device,
+            get_server_status,
+            set_frp_server_addr,
+            set_frp_server_port,
+            set_frp_token,
+            set_frp_use_tls,
+            get_local_ip,
+            start_frp,
+            stop_frp,
+            get_frp_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
