@@ -333,11 +333,11 @@ function App() {
     if (!activeSessionId) return;
     const isBusy = sessionBusy[activeSessionId] || false;
     if (isBusy) {
-      if (queue.length >= 2) {
+      if (currentQueue.length >= 2) {
         alert("队列已满！目前最多只允许队列中有 2 个排队任务。");
         return;
       }
-      setQueue(prev => [...prev, { id: generateUUID(), prompt: content }]);
+      setQueues(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] || []), { id: generateUUID(), prompt: content }] }));
     } else {
       setSessionBusy(prev => ({ ...prev, [activeSessionId]: true }));
       invoke("write_to_terminal", { sessionId: activeSessionId, data: content + "\r\n" })
@@ -362,7 +362,8 @@ function App() {
     id: string;
     prompt: string;
   }
-  const [queue, setQueue] = useState<QueueTask[]>([]);
+  const [queues, setQueues] = useState<Record<string, QueueTask[]>>({});
+  const currentQueue = activeSessionId ? (queues[activeSessionId] || []) : [];
   const [showQueueModal, setShowQueueModal] = useState<boolean>(false);
   const [queueInput, setQueueInput] = useState<string>("");
   const [sessionBusy, setSessionBusy] = useState<Record<string, boolean>>({});
@@ -465,16 +466,17 @@ function App() {
   };
 
   const handleAddToQueue = () => {
+    if (!activeSessionId) return;
     const trimmed = queueInput.trim();
     if (!trimmed) {
       alert("请输入要排队执行的提示词！");
       return;
     }
-    if (queue.length >= 2) {
+    if (currentQueue.length >= 2) {
       alert("队列已满！目前最多只允许队列中有 2 个排队任务。");
       return;
     }
-    setQueue(prev => [...prev, { id: generateUUID(), prompt: trimmed }]);
+    setQueues(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] || []), { id: generateUUID(), prompt: trimmed }] }));
     setQueueInput("");
     setShowQueueModal(false);
   };
@@ -483,20 +485,20 @@ function App() {
   useEffect(() => {
     if (!activeSessionId) return;
     const isActiveBusy = sessionBusy[activeSessionId] || false;
-    if (!isActiveBusy && queue.length > 0) {
+    if (!isActiveBusy && currentQueue.length > 0) {
       // 弹出并执行下一个排队任务
-      const nextTask = queue[0];
+      const nextTask = currentQueue[0];
       log(`[Queue] Auto-triggering queued task: "${nextTask.prompt}" for session: ${activeSessionId}`);
-      
+
       // 立即在前端置为繁忙，防范异步重入和并发发送
       setSessionBusy(prev => ({ ...prev, [activeSessionId]: true }));
-      
+
       // 写入终端
       invoke("write_to_terminal", { sessionId: activeSessionId, data: nextTask.prompt + "\r\n" })
         .then(() => {
           handleUserSubmittedInputWithRenameReset(activeSessionId);
           log(`[Queue] Successfully sent task to terminal. Removing from queue...`);
-          setQueue(prev => prev.slice(1));
+          setQueues(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] || []).slice(1) }));
         })
         .catch((err) => {
           log(`[Queue] Failed to send queued task: ${err}`);
@@ -504,7 +506,7 @@ function App() {
           setSessionBusy(prev => ({ ...prev, [activeSessionId]: false }));
         });
     }
-  }, [queue, activeSessionId, sessionBusy]);
+  }, [queues, activeSessionId, sessionBusy]);
 
   // 当队列长度或显示状态变化时，强力触发 resize 事件，确保 xterm.js 虚拟终端完美重测尺寸且不遮挡输入框
   useEffect(() => {
@@ -512,7 +514,7 @@ function App() {
       window.dispatchEvent(new Event("resize"));
     }, 80); // 80ms 确保 DOM 树重排与 CSS 动画过渡彻底完成
     return () => clearTimeout(timer);
-  }, [queue.length]);
+  }, [currentQueue.length]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
@@ -2352,7 +2354,7 @@ function App() {
           </div>
 
           {/* 新增的队列列表面板 */}
-          {queue.length > 0 && (
+          {currentQueue.length > 0 && activeSessionId && (
             <div className="queue-list-panel">
               <div className="queue-panel-header">
                 <div className="queue-panel-title">
@@ -2364,11 +2366,11 @@ function App() {
                     <line x1="3" y1="12" x2="3.01" y2="12"></line>
                     <line x1="3" y1="18" x2="3.01" y2="18"></line>
                   </svg>
-                  <span>任务队列 ({queue.length})</span>
+                  <span>任务队列 ({currentQueue.length})</span>
                 </div>
-                <button 
+                <button
                   className="queue-clear-btn"
-                  onClick={() => setQueue([])}
+                  onClick={() => setQueues(prev => ({ ...prev, [activeSessionId]: [] }))}
                   title="全部清空队列"
                 >
                   <svg className="trash-svg-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2380,13 +2382,13 @@ function App() {
                 </button>
               </div>
               <div className="queue-panel-body">
-                {queue.map((task, index) => (
+                {currentQueue.map((task, index) => (
                   <div key={task.id} className="queue-item">
                     <span className="queue-item-index">{index + 1}</span>
                     <span className="queue-item-text">{task.prompt}</span>
                     <button
                       className="queue-item-delete"
-                      onClick={() => setQueue(prev => prev.filter(t => t.id !== task.id))}
+                      onClick={() => setQueues(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] || []).filter(t => t.id !== task.id) }))}
                       title="删除排队任务"
                     >
                       ✕
@@ -2466,8 +2468,8 @@ function App() {
                     <line x1="3" y1="18" x2="3.01" y2="18"></line>
                   </svg>
                   <span>队列</span>
-                  {queue.length > 0 && (
-                    <span className="queue-badge">{queue.length}</span>
+                  {currentQueue.length > 0 && (
+                    <span className="queue-badge">{currentQueue.length}</span>
                   )}
                 </button>
 
@@ -2629,7 +2631,7 @@ function App() {
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--text-secondary)", fontSize: "11.5px" }}>
                 <span>Enter 添加到队列 · Shift+Enter 换行 · Esc 取消</span>
-                <span>当前队列: {queue.length}/2</span>
+                <span>当前队列: {currentQueue.length}/2</span>
               </div>
             </div>
             <div className="modal-footer" style={{ marginTop: "10px" }}>
