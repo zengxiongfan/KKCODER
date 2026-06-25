@@ -4,6 +4,7 @@ use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 
+use super::conversation;
 use super::handlers;
 use super::state::RemoteServerState;
 use super::ws;
@@ -24,6 +25,15 @@ pub fn build_router(state: Arc<RemoteServerState>) -> Router {
         .route("/api/sessions/{id}/spawn", post(handlers::spawn_session))
         // WebSocket 会话连接（需要认证）
         .route("/api/sessions/{id}/ws", get(ws::ws_connect))
+        // 对话模式：REST 获取历史消息 + WebSocket 推送对话事件（需要认证）
+        .route(
+            "/api/sessions/{id}/messages",
+            get(conversation::get_messages),
+        )
+        .route(
+            "/api/sessions/{id}/chat-ws",
+            get(conversation::chat_ws_handler),
+        )
         // 桌面端轮询 spawn 请求（无需认证，仅本机访问）
         .route("/api/spawn-requests", get(handlers::poll_spawn_requests))
         // 服务器状态

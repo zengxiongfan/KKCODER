@@ -144,9 +144,9 @@ async fn handle_session(
                                     }
                                 }
                             }
-                            ClientMessage::Resize { cols, rows } => {
-                                // Resize 需要通过 Tauri 命令处理
-                                let _ = (cols, rows);
+                            ClientMessage::Resize { cols: _, rows: _ } => {
+                                // 忽略手机端 resize，PTY 尺寸由桌面端控制
+                                // 避免手机端小屏幕把桌面终端排版搞乱
                             }
                             ClientMessage::Replay { last_seq } => {
                                 // 断线重连：补发 last_seq 之后的输出

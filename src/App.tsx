@@ -1196,6 +1196,85 @@ function App() {
     };
   }, []);
 
+  // 📱 监听远程 spawn 请求事件（手机端发起的新建/唤醒会话）
+  useEffect(() => {
+    const unlistenPromise = import("@tauri-apps/api/event").then(({ listen }) =>
+      listen("remote-spawn-request", async (event: any) => {
+        const { session_id, directory, agent_type, agent_session_id, is_reopen } = event.payload;
+        log(`[RemoteSpawn] Received spawn request: session=${session_id}, dir=${directory}, agent=${agent_type}, reopen=${is_reopen}, agent_session_id=${agent_session_id}`);
+
+        try {
+          const existing = sessions.find((s) => s.id === session_id);
+          const hasAgentSessionId = agent_session_id && agent_session_id.length > 0;
+          const finalAgentSessionId = hasAgentSessionId ? agent_session_id : generateUUID();
+
+          if (existing) {
+            // 会话已存在于前端列表
+            if (!existing.agentSessionId && hasAgentSessionId) {
+              await invoke("add_session", { session: { ...existing, agentSessionId: finalAgentSessionId } });
+              setSessions((prev) => prev.map(s => s.id === session_id ? { ...s, agentSessionId: finalAgentSessionId } : s));
+            }
+
+            try {
+              await invoke("spawn_terminal", {
+                sessionId: session_id,
+                directory: directory,
+                agentType: agent_type || "claude",
+                agentSessionId: finalAgentSessionId,
+                isReopen: hasAgentSessionId && (is_reopen ?? true),
+              });
+            } catch (spawnErr) {
+              const errStr = String(spawnErr);
+              if (errStr.includes("already in use") || errStr.includes("already active")) {
+                log(`[RemoteSpawn] Session ${session_id} already running, activating tab.`);
+              } else {
+                throw spawnErr;
+              }
+            }
+          } else {
+            // 新会话
+            const folderName = directory.split(/[/\\]/).pop() || directory;
+            const newSession: Session = {
+              id: session_id,
+              name: "新对话",
+              path: directory,
+              project: folderName,
+              type: agent_type || "claude",
+              agentSessionId: finalAgentSessionId,
+              favorite: 0,
+            };
+            await invoke("add_session", { session: newSession });
+            setSessions((prev) => [...prev, newSession]);
+
+            await invoke("spawn_terminal", {
+              sessionId: session_id,
+              directory: directory,
+              agentType: agent_type || "claude",
+              agentSessionId: finalAgentSessionId,
+              isReopen: false,
+            });
+          }
+
+          // 打开并激活会话标签
+          setOpenTabIds((prev) => prev.includes(session_id) ? prev : [...prev, session_id]);
+          setActiveSessionId(session_id);
+          log(`[RemoteSpawn] Successfully spawned session ${session_id}`);
+
+          // 刷新会话列表
+          invoke<Session[]>("get_sessions").then((updated) => {
+            if (updated) setSessions(updated);
+          }).catch(() => {});
+        } catch (e) {
+          log(`[RemoteSpawn] Failed to spawn session ${session_id}: ${e}`);
+        }
+      })
+    );
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [sessions]);
+
   // 📂 调用 Rust 后端，在资源管理器中打开项目物理文件夹路径
   const handleOpenFolder = async () => {
     if (!activeSession) return;

@@ -24,7 +24,7 @@ fn log_to_file(message: &str) {
 }
 
 pub struct ActiveSession {
-    master: Box<dyn MasterPty + Send>,
+    master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     spawn_token: u64,
 }
@@ -32,6 +32,7 @@ pub struct ActiveSession {
 pub struct PtyManager {
     pub sessions: Arc<Mutex<HashMap<String, ActiveSession>>>,
     pub session_registry: Option<Arc<remote::state::SessionRegistry>>,
+    pub conversation: Option<Arc<remote::conversation::ConversationState>>,
 }
 
 impl Default for PtyManager {
@@ -39,6 +40,7 @@ impl Default for PtyManager {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             session_registry: None,
+            conversation: None,
         }
     }
 }
@@ -999,6 +1001,7 @@ fn spawn_terminal(
         err_msg
     })?;
     log_to_file("Master reader cloned.");
+    let master_shared = Arc::new(Mutex::new(master));
 
     // 自动运行 Agent CLI 脚本
     // 自动运行 Agent CLI 脚本
@@ -1045,9 +1048,9 @@ fn spawn_terminal(
         let session_id_clone = session_id.clone();
         let agent_session_id_clone = agent_session_id.clone();
         std::thread::spawn(move || {
-            log_to_file(&format!("Background `/resume` thread spawned. spawn_token={}. Sleeping 2500ms...", spawn_token));
-            // 等待 2.5 秒让 Claude 客户端完全拉起并输出提示符
-            std::thread::sleep(std::time::Duration::from_millis(2500));
+            log_to_file(&format!("Background `/resume` thread spawned. spawn_token={}. Sleeping 3000ms...", spawn_token));
+            // 等待 3 秒让 Claude 客户端完全拉起并输出提示符
+            std::thread::sleep(std::time::Duration::from_millis(3000));
             log_to_file("Background `/resume` thread sleep finished. Locking sessions map...");
             let mut sessions = sessions_clone.lock().unwrap();
             if let Some(session) = sessions.get_mut(&session_id_clone) {
@@ -1057,6 +1060,7 @@ fn spawn_terminal(
                     return;
                 }
 
+                // 分两步发送：先发命令，再发回车
                 let resume_cmd = format!("/resume {}", agent_session_id_clone);
                 log_to_file(&format!("Background thread: writing resume cmd: {:?}", resume_cmd));
                 {
@@ -1064,27 +1068,19 @@ fn spawn_terminal(
                     w.write_all(resume_cmd.as_bytes()).ok();
                     w.flush().ok();
                 }
-                log_to_file("Background thread: resume cmd written. Dropping lock and sleeping 500ms...");
+                log_to_file("Background thread: resume cmd written, sleeping 200ms before Enter...");
 
-                // 释放锁，防止阻塞其他线程
-                drop(sessions);
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                // 等待 200ms 确保命令被处理
+                std::thread::sleep(std::time::Duration::from_millis(200));
 
-                // 重新获取锁并触发一次回车
-                log_to_file("Background thread: re-acquiring lock to trigger Enter...");
-                let mut sessions = sessions_clone.lock().unwrap();
-                if let Some(session) = sessions.get_mut(&session_id_clone) {
-                    if session.spawn_token != spawn_token {
-                        log_to_file("Stale spawn token during Enter key trigger. Safely skipping Enter.");
-                        return;
-                    }
+                // 发送回车
+                log_to_file("Background thread: sending Enter key...");
+                {
                     let mut w = session.writer.lock().unwrap();
-                    w.write_all(b"\r\n").ok();
+                    w.write_all(b"\r").ok();
                     w.flush().ok();
-                    log_to_file("Background thread: Enter key sent!");
-                } else {
-                    log_to_file("Background thread error during Enter send: session lost!");
                 }
+                log_to_file("Background thread: Enter key sent successfully!");
             } else {
                 log_to_file("Background thread error: active session not found inside sessions map!");
             }
@@ -1131,6 +1127,22 @@ fn spawn_terminal(
             remote::state::SessionStatus::Idle,
         ));
 
+        // 创建 resize 通道，后台线程接收 resize 命令并执行
+        let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel::<(u16, u16)>(8);
+        let master_for_resize = master_shared.clone();
+        std::thread::spawn(move || {
+            while let Some((cols, rows)) = resize_rx.blocking_recv() {
+                if let Ok(m) = master_for_resize.lock() {
+                    let _ = m.resize(portable_pty::PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
+                }
+            }
+        });
+
         let handle = Arc::new(remote::state::SessionHandle {
             input_tx: {
                 // 创建一个虚拟通道（实际输入通过 pty_writer 直接写入）
@@ -1142,15 +1154,25 @@ fn spawn_terminal(
             replay: replay.clone(),
             session_name: String::new(),
             pty_writer: Some(writer.clone()),
+            resize_tx: Some(resize_tx),
+            agent_session_id: agent_session_id.clone(),
+            project_path: directory.clone(),
         });
 
         registry.insert(session_id.clone(), handle);
+
+        // 注册到 ConversationState（用于 JSONL 对话模式）
+        if let Some(ref conv) = state.conversation {
+            conv.register_session(&session_id, &agent_session_id, &directory);
+        }
+
         Some(output_tx)
     } else {
         None
     };
 
     log_to_file("Spawning PTY reader listener thread...");
+    let conversation_for_cleanup = state.conversation.clone();
     std::thread::spawn(move || {
         log_to_file("PTY reader listener thread spawned.");
         let mut reader = reader;
@@ -1199,6 +1221,10 @@ fn spawn_terminal(
         // 当进程退出时，自动从 sessions map 中清理，以防下一次无法重新拉起
         let mut sessions = sessions_map_clone.lock().unwrap();
         sessions.remove(&session_id_clone);
+        // 注销 ConversationState 中的会话
+        if let Some(ref conv) = conversation_for_cleanup {
+            conv.unregister_session(&session_id_clone);
+        }
         log_to_file(&format!(
             "Session {} cleaned up from sessions map after PTY EOF.",
             session_id_clone
@@ -1210,7 +1236,7 @@ fn spawn_terminal(
     sessions.insert(
         session_id.clone(),
         ActiveSession {
-            master,
+            master: master_shared.clone(),
             writer: writer.clone(),
             spawn_token,
         },
@@ -1255,7 +1281,8 @@ fn resize_terminal(
 ) -> Result<(), String> {
     let sessions = state.sessions.lock().unwrap();
     if let Some(session) = sessions.get(&session_id) {
-        session.master.resize(PtySize {
+        let master = session.master.lock().map_err(|e| e.to_string())?;
+        master.resize(PtySize {
             rows,
             cols,
             pixel_width: 0,
@@ -1337,6 +1364,11 @@ fn close_terminal(
     let mut sessions = state.sessions.lock().unwrap();
     if sessions.remove(&session_id).is_some() {
         log_to_file(&format!("Session {} successfully removed and dropped.", session_id));
+        // 从远程 session_registry 中移除（同步更新手机端状态）
+        if let Some(ref registry) = state.session_registry {
+            registry.remove(&session_id);
+            log_to_file(&format!("Session {} removed from remote registry.", session_id));
+        }
         Ok(())
     } else {
         log_to_file(&format!("Session {} not found in active sessions map.", session_id));
@@ -1523,7 +1555,7 @@ fn encode_claude_project_path(path: &str) -> String {
 }
 
 /// 在 ~/.claude/projects/ 下查找指定 session 的 JSONL 文件
-fn find_claude_jsonl(agent_session_id: &str, project_path: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn find_claude_jsonl(agent_session_id: &str, project_path: &str) -> Option<std::path::PathBuf> {
     let home = dirs::home_dir()?;
     let projects_root = home.join(".claude").join("projects");
     if !projects_root.is_dir() {
@@ -1553,7 +1585,7 @@ fn find_claude_jsonl(agent_session_id: &str, project_path: &str) -> Option<std::
 }
 
 /// 从 JSONL 文件中读取用户消息（移植自 rename 的 claude_code adapter）
-fn read_claude_transcript(jsonl_path: &std::path::Path) -> Vec<(String, String)> {
+pub(crate) fn read_claude_transcript(jsonl_path: &std::path::Path) -> Vec<(String, String)> {
     let file = match std::fs::File::open(jsonl_path) {
         Ok(f) => f,
         Err(_) => return vec![],
@@ -1605,7 +1637,7 @@ fn read_claude_transcript(jsonl_path: &std::path::Path) -> Vec<(String, String)>
 }
 
 /// 从 user 消息 JSON 中提取 content
-fn extract_message_content(obj: &serde_json::Value) -> String {
+pub(crate) fn extract_message_content(obj: &serde_json::Value) -> String {
     let message = match obj.get("message") {
         Some(m) => m,
         None => return String::new(),
@@ -1633,7 +1665,7 @@ fn extract_message_content(obj: &serde_json::Value) -> String {
 }
 
 /// 从 assistant 消息 JSON 中提取纯文本
-fn extract_assistant_text(obj: &serde_json::Value) -> String {
+pub(crate) fn extract_assistant_text(obj: &serde_json::Value) -> String {
     let message = match obj.get("message") {
         Some(m) => m,
         None => return String::new(),
@@ -3040,27 +3072,39 @@ pub fn run() {
         }
     };
 
+    // 初始化对话状态管理（JSONL 监听 + chat 事件推送）
+    let conversation_state = Arc::new(remote::conversation::ConversationState::new());
+
     let remote_state = Arc::new(remote::state::RemoteServerState {
         session_registry: session_registry.clone(),
         config: Arc::new(tokio::sync::Mutex::new(remote_config)),
         paired_devices: Arc::new(paired_devices),
         db_path: db_path.clone(),
         spawn_requests: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+        conversation: Some(conversation_state.clone()),
     });
 
     // 启动远程访问服务器（在独立线程中）
     let remote_state_for_server = remote_state.clone();
+    let conversation_for_watcher = conversation_state.clone();
+    let registry_for_watcher = session_registry.clone();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
+        // 启动 JSONL 文件监听器
+        rt.spawn(remote::conversation::run_jsonl_watcher(
+            conversation_for_watcher,
+            registry_for_watcher,
+        ));
         let _ = rt.block_on(remote::server::start_remote_server(remote_state_for_server));
     });
 
-    // 创建 PtyManager 并注入 session_registry
+    // 创建 PtyManager 并注入 session_registry 和 conversation
     let mut pty_manager = PtyManager::default();
     pty_manager.session_registry = Some(session_registry.clone());
+    pty_manager.conversation = Some(conversation_state.clone());
 
     tauri::Builder::default()
         .manage(pty_manager)

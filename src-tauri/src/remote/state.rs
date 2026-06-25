@@ -18,6 +18,8 @@ pub struct RemoteServerState {
     pub db_path: PathBuf,
     /// 待桌面端执行的 spawn 请求队列
     pub spawn_requests: Arc<tokio::sync::Mutex<Vec<SpawnRequest>>>,
+    /// 对话状态管理（JSONL 监听 + chat 事件推送）
+    pub conversation: Option<Arc<super::conversation::ConversationState>>,
 }
 
 /// 远程 spawn 请求（手机端发起，桌面端执行）
@@ -38,6 +40,7 @@ impl Clone for RemoteServerState {
             paired_devices: self.paired_devices.clone(),
             db_path: self.db_path.clone(),
             spawn_requests: self.spawn_requests.clone(),
+            conversation: self.conversation.clone(),
         }
     }
 }
@@ -98,6 +101,12 @@ pub struct SessionHandle {
     pub session_name: String,
     /// PTY 写入器的引用（用于远程输入写入）
     pub pty_writer: Option<Arc<std::sync::Mutex<Box<dyn std::io::Write + Send>>>>,
+    /// PTY resize 通道（cols, rows）
+    pub resize_tx: Option<mpsc::Sender<(u16, u16)>>,
+    /// Claude Code agent session ID（用于 JSONL 会话记录查找）
+    pub agent_session_id: String,
+    /// 项目路径（用于 JSONL 会话记录查找）
+    pub project_path: String,
 }
 
 /// 输入命令

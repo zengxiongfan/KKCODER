@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 pub mod auth;
+pub mod conversation;
 #[allow(dead_code)]
 pub mod frp;
 #[allow(dead_code)]

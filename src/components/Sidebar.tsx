@@ -592,6 +592,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
 
+
   // 8. 统一会话行渲染函数 (复用在置顶收藏组和常规项目树中)
   const renderSessionRow = (session: Session) => {
     const isActive = activeSessionId === session.id;

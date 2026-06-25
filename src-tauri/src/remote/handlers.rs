@@ -7,12 +7,30 @@ use axum::Json;
 use super::auth::AuthToken;
 use super::state::RemoteServerState;
 
+fn log_to_file(message: &str) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open("kkcoder_debug.log")
+    {
+        let now = std::time::SystemTime::now();
+        let since = now
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = writeln!(file, "[Timestamp: {}ms] {}", since.as_millis(), message);
+    }
+}
+
 /// 会话 DTO（匹配手机端 Session 模型）
 #[derive(serde::Serialize)]
 pub struct SessionDTO {
     pub id: String,
     pub name: String,
     pub project: String,
+    pub path: String,
     #[serde(rename = "type")]
     pub session_type: String,
     #[serde(rename = "agentSessionId")]
@@ -76,7 +94,7 @@ pub async fn list_sessions(
         let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, project, type, agent_session_id, created_at, last_user_message_at \
+                "SELECT id, name, project, path, type, agent_session_id, created_at, last_user_message_at \
                  FROM sessions WHERE deleted = 0 ORDER BY created_at ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -89,10 +107,11 @@ pub async fn list_sessions(
                     id,
                     name: row.get(1)?,
                     project: row.get(2)?,
-                    session_type: row.get(3)?,
-                    agent_session_id: row.get(4)?,
-                    created_at: row.get(5)?,
-                    last_user_message_at: row.get(6)?,
+                    path: row.get(3)?,
+                    session_type: row.get(4)?,
+                    agent_session_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    last_user_message_at: row.get(7)?,
                     active,
                 })
             })
@@ -188,16 +207,27 @@ pub async fn init_pairing(
     }))
 }
 
-/// POST /api/pair/verify - 验证 PIN，返回 token
+/// POST /api/pair/verify - 验证 PIN，返回 token (v2 - with JSON errors)
 pub async fn verify_pairing(
     State(state): State<Arc<RemoteServerState>>,
     Json(req): Json<PairVerifyRequest>,
-) -> Result<Json<PairVerifyResponse>, (StatusCode, String)> {
+) -> Result<Json<PairVerifyResponse>, (StatusCode, Json<serde_json::Value>)> {
+    log_to_file("[verify_pairing] v2 handler called!");
     // 从数据库读取 PIN（Tauri 命令写入的位置）
     let (pin_value, pin_expires_at) = {
         let db_path = state.db_path.clone();
         tokio::task::spawn_blocking(move || -> Result<(Option<String>, Option<std::time::SystemTime>), String> {
-            let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+            let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+
+            // 列出所有 remote_config 用于调试
+            if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM remote_config") {
+                if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))) {
+                    for row in rows.flatten() {
+                        log_to_file(&format!("[verify_pairing] remote_config: {} = {}", row.0, row.1));
+                    }
+                }
+            }
+
             let pin: Option<String> = conn.query_row(
                 "SELECT value FROM remote_config WHERE key = 'pairing_pin'",
                 [],
@@ -212,20 +242,23 @@ pub async fn verify_pairing(
                 let millis: u64 = s.parse().ok()?;
                 std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(millis))
             });
+            log_to_file(&format!("[verify_pairing] db_path={}, pin_found={}, pin_value={:?}, expires_at={:?}, input_pin={}",
+                db_path.display(), pin.is_some(), pin, expires_at, "hidden"));
             Ok((pin, expires_at))
         })
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))))?
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e}))))?
     };
 
     let pin_value = pin_value.ok_or((
         StatusCode::BAD_REQUEST,
-        "No active pairing session".to_string(),
+        Json(serde_json::json!({"error": "No active pairing session. Please generate a PIN on the desktop first."})),
     ))?;
 
     if !super::auth::verify_pin(&req.pin, &pin_value, pin_expires_at) {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid or expired PIN".to_string()));
+        log_to_file(&format!("[verify_pairing] PIN mismatch: input='{}', stored='{}'", req.pin, pin_value));
+        return Err((StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid or expired PIN"}))));
     }
 
     let token = super::auth::generate_token();
