@@ -357,6 +357,66 @@ function App() {
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renamingTabText, setRenamingTabText] = useState<string>("");
 
+  // 标签页 Tooltip 状态管理
+  const [tabTooltip, setTabTooltip] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    session: Session | null;
+  }>({ visible: false, x: 0, y: 0, session: null });
+  const tabTooltipShowTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabTooltipHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleTabMouseEnter = (e: React.MouseEvent, session: Session) => {
+    if (tabTooltipHideTimeoutRef.current) {
+      clearTimeout(tabTooltipHideTimeoutRef.current);
+      tabTooltipHideTimeoutRef.current = null;
+    }
+    // 在setTimeout前保存rect，因为React合成事件在回调执行时已被回收
+    const rect = e.currentTarget.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const bottomY = rect.bottom + 8;
+    tabTooltipShowTimeoutRef.current = setTimeout(() => {
+      setTabTooltip({
+        visible: true,
+        x: centerX,
+        y: bottomY,
+        session,
+      });
+    }, 300);
+  };
+
+  const handleTabMouseLeave = () => {
+    if (tabTooltipShowTimeoutRef.current) {
+      clearTimeout(tabTooltipShowTimeoutRef.current);
+      tabTooltipShowTimeoutRef.current = null;
+    }
+    tabTooltipHideTimeoutRef.current = setTimeout(() => {
+      setTabTooltip(prev => ({ ...prev, visible: false }));
+    }, 100);
+  };
+
+  const handleTabTooltipMouseEnter = () => {
+    if (tabTooltipHideTimeoutRef.current) {
+      clearTimeout(tabTooltipHideTimeoutRef.current);
+      tabTooltipHideTimeoutRef.current = null;
+    }
+  };
+
+  const handleTabTooltipMouseLeave = () => {
+    tabTooltipHideTimeoutRef.current = setTimeout(() => {
+      setTabTooltip(prev => ({ ...prev, visible: false }));
+    }, 100);
+  };
+
+  const handleOpenFolderPath = async (path: string) => {
+    try {
+      await invoke("open_project_folder", { path });
+    } catch (err) {
+      console.error("打开文件夹失败:", err);
+    }
+  };
+
   // 📋 任务队列状态与自动调度引擎
   interface QueueTask {
     id: string;
@@ -2124,6 +2184,8 @@ function App() {
                         handleCloseTab(ev, s.id);
                       }
                     }}
+                    onMouseEnter={(e) => handleTabMouseEnter(e, s)}
+                    onMouseLeave={handleTabMouseLeave}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -2157,8 +2219,8 @@ function App() {
                         ) : (
                           s.type === "claude" ? <ClaudeIcon size={14} color="#D97757" /> : <PiIcon size={14} color="var(--color-green)" />
                         )}
-                        <span className="tab-title-text" title={s.name}>{s.name}</span>
-                        {s.project && !s.isTemp && <span className="tab-project-tag" title={s.project}>{s.project}</span>}
+                        <span className="tab-title-text">{s.name}</span>
+                        {s.project && !s.isTemp && <span className="tab-project-tag">{s.project}</span>}
                       </span>
                     )}
                     <span
@@ -2639,6 +2701,34 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* 标签页 Tooltip */}
+      {tabTooltip.visible && tabTooltip.session && (
+        <div
+          className="tab-tooltip"
+          style={{
+            position: "fixed",
+            left: `${tabTooltip.x}px`,
+            top: `${tabTooltip.y}px`,
+            transform: "translateX(-50%)",
+            zIndex: 10000,
+          }}
+          onMouseEnter={handleTabTooltipMouseEnter}
+          onMouseLeave={handleTabTooltipMouseLeave}
+        >
+          <div className="tab-tooltip-name">{tabTooltip.session.name}</div>
+          {tabTooltip.session.path && !tabTooltip.session.isTemp && (
+            <div
+              className="tab-tooltip-path"
+              onClick={() => handleOpenFolderPath(tabTooltip.session!.path)}
+            >
+              <span className="tab-tooltip-path-icon">📁</span>
+              <span className="tab-tooltip-path-text">{tabTooltip.session.path}</span>
+            </div>
+          )}
+          <div className="tab-tooltip-arrow" />
+        </div>
+      )}
 
       {/* 新建会话终端弹窗组件 */}
       <NewSessionModal
