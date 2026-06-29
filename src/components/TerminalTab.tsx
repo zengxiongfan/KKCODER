@@ -457,10 +457,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
               const formatted = lines.map(line => {
                 const clean = line.replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
                 if (/\.(png|jpe?g|gif|webp|bmp|tiff)$/i.test(clean)) {
-                  // Add a trailing space inside the quotes to prevent Claude Code from auto-converting to [Image]
-                  return `"${clean} "`;
+                  // Append a zero-width space to prevent Claude Code from auto-converting to [Image]
+                  return `${clean}​`;
                 }
-                return `"${clean}"`;
+                return clean;
               }).join(" ");
               term.paste(formatted);
             } else {
@@ -474,8 +474,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                       log(`Detected image paste of type: ${type}`);
                       try {
                         const blob = await clipboardItem.getType(type);
-                        const filename = `clipboard_img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png.tmp`;
-                        
+                        const filename = `clipboard_img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png`;
+
                         const reader = new FileReader();
                         reader.onload = async () => {
                           try {
@@ -486,7 +486,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                               filename
                             });
                             log(`Successfully saved clipboard image to: ${filePath}`);
-                            term.paste(`"${filePath}"`);
+                            // Append a zero-width space to prevent Claude Code from auto-converting to [Image]
+                            term.paste(`${filePath}​`);
                           } catch (e) {
                             log(`Failed to save clipboard image via Tauri: ${e}`);
                           }
@@ -537,8 +538,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                     log(`Detected image paste of type: ${type}`);
                     try {
                       const blob = await clipboardItem.getType(type);
-                      const filename = `clipboard_img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png.tmp`;
-                      
+                      const filename = `clipboard_img_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.png`;
+
                       const reader = new FileReader();
                       reader.onload = async () => {
                         try {
@@ -549,7 +550,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                             filename
                           });
                           log(`Successfully saved clipboard image to: ${filePath}`);
-                          term.paste(`"${filePath}"`);
+                          // Append a zero-width space to prevent Claude Code from auto-converting to [Image]
+                          term.paste(`${filePath}​`);
                         } catch (e) {
                           log(`Failed to save clipboard image via Tauri: ${e}`);
                         }

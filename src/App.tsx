@@ -411,7 +411,10 @@ function App() {
 
   const handleOpenFolderPath = async (path: string) => {
     try {
-      await invoke("open_project_folder", { path });
+      // tooltip 里点击的可能是文件路径，使用 open_terminal_path 让 Rust 端自动判断：
+      //   - 若是文件：在文件管理器中打开父目录并选中该文件
+      //   - 若是文件夹：直接打开该文件夹
+      await invoke("open_terminal_path", { path });
     } catch (err) {
       console.error("打开文件夹失败:", err);
     }
