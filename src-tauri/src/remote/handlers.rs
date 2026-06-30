@@ -41,6 +41,9 @@ pub struct SessionDTO {
     pub last_user_message_at: Option<String>,
     /// 是否在桌面端运行中
     pub active: bool,
+    /// 运行状态: "thinking" | "idle"
+    #[serde(rename = "runStatus")]
+    pub run_status: String,
 }
 
 /// 服务器状态 DTO
@@ -90,6 +93,7 @@ pub async fn list_sessions(
 ) -> Result<Json<Vec<SessionDTO>>, (StatusCode, String)> {
     let db_path = state.db_path.clone();
     let registry = state.session_registry.clone();
+    let conversation = state.conversation.clone();
     let sessions = tokio::task::spawn_blocking(move || -> Result<Vec<SessionDTO>, String> {
         let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
         let mut stmt = conn
@@ -103,6 +107,14 @@ pub async fn list_sessions(
             .query_map([], |row| {
                 let id: String = row.get(0)?;
                 let active = registry.get(&id).is_some();
+                let run_status = if active {
+                    conversation
+                        .as_ref()
+                        .map(|c| c.get_run_status(&id))
+                        .unwrap_or_else(|| "idle".to_string())
+                } else {
+                    "idle".to_string()
+                };
                 Ok(SessionDTO {
                     id,
                     name: row.get(1)?,
@@ -113,6 +125,7 @@ pub async fn list_sessions(
                     created_at: row.get(6)?,
                     last_user_message_at: row.get(7)?,
                     active,
+                    run_status,
                 })
             })
             .map_err(|e| e.to_string())?;

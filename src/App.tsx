@@ -142,6 +142,7 @@ function App() {
     return saved ? parseInt(saved, 10) : 300;
   });
   const [isResizing, setIsResizing] = useState<boolean>(false);
+  const [isDragOverWorkspace, setIsDragOverWorkspace] = useState<boolean>(false);
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -187,6 +188,7 @@ function App() {
     return saved ? parseInt(saved, 10) : 260;
   });
   const [isResizingProjectTree, setIsResizingProjectTree] = useState<boolean>(false);
+  const projectTreeAsideRef = useRef<HTMLElement>(null);
   const [showProjectTree, setShowProjectTree] = useState<boolean>(() => {
     return localStorage.getItem("kkcoder_show_project_tree") === "true";
   });
@@ -581,6 +583,36 @@ function App() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
+  // 文件树自适应宽度：监听树内容变化，自动调整面板宽度
+  useEffect(() => {
+    const aside = projectTreeAsideRef.current;
+    if (!aside) return;
+
+    const adjustWidth = () => {
+      const root = aside.querySelector(".project-tree-root");
+      if (!root) return;
+      const contentWidth = (root as HTMLElement).scrollWidth;
+      const maxW = Math.floor(window.innerWidth * 0.4);
+      const newW = Math.max(200, Math.min(maxW, contentWidth + 4));
+      setProjectTreeWidth(newW);
+      localStorage.setItem("kkcoder_project_tree_width", newW.toString());
+    };
+
+    // 初次渲染后测量
+    const timer = setTimeout(adjustWidth, 100);
+
+    // 监听子树变化（展开/折叠/加载）
+    const observer = new MutationObserver(() => {
+      setTimeout(adjustWidth, 50);
+    });
+    observer.observe(aside, { childList: true, subtree: true });
+
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [showProjectTree, activeSession?.path]);
+
   const insertConversationTagToActiveTerminal = useCallback((text: string) => {
     if (!activeSessionId || !text) return;
     window.dispatchEvent(new CustomEvent("kkcoder-insert-conversation-tag", {
@@ -590,6 +622,14 @@ function App() {
       },
     }));
   }, [activeSessionId]);
+
+  // 文件拖拽到指定会话：将路径插入到目标会话的终端
+  const handleInsertPathToSession = useCallback((sessionId: string, text: string) => {
+    if (!sessionId || !text) return;
+    window.dispatchEvent(new CustomEvent("kkcoder-insert-conversation-tag", {
+      detail: { sessionId, text },
+    }));
+  }, []);
 
   // 切换会话项目路径时自动清空文件预览
   useEffect(() => {
@@ -2150,7 +2190,28 @@ function App() {
         <div className={`sidebar-resizer ${isResizing ? "dragging" : ""}`} onMouseDown={startResize} />
 
         {/* 右侧主工作区 */}
-        <main className="main-workspace">
+        <main
+          className={`main-workspace ${isDragOverWorkspace ? "drag-over" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            if (!isDragOverWorkspace) setIsDragOverWorkspace(true);
+          }}
+          onDragLeave={(e) => {
+            // 只在真正离开 main 区域时清除（忽略子元素冒泡）
+            if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+              setIsDragOverWorkspace(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragOverWorkspace(false);
+            const text = e.dataTransfer.getData("text/plain");
+            if (text) {
+              handleInsertPathToSession(activeSessionId, text);
+            }
+          }}
+        >
           {/* 顶部 Tab 标签栏 */}
           <div className="tab-bar">
             <div className="tab-list" onWheel={handleTabWheel}>
@@ -2644,7 +2705,8 @@ function App() {
               onMouseDown={startProjectTreeResize} 
               data-agent-type={activeSession?.type || "claude"}
             />
-            <aside 
+            <aside
+              ref={projectTreeAsideRef}
               className="project-tree-aside"
               style={{ width: `${projectTreeWidth}px` }}
             >

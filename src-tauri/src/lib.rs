@@ -3095,6 +3095,11 @@ pub fn run() {
             .unwrap();
         // 启动 JSONL 文件监听器
         rt.spawn(remote::conversation::run_jsonl_watcher(
+            conversation_for_watcher.clone(),
+            registry_for_watcher.clone(),
+        ));
+        // 启动 TUI 交互检测器
+        rt.spawn(remote::tui_watcher::run_tui_watcher(
             conversation_for_watcher,
             registry_for_watcher,
         ));

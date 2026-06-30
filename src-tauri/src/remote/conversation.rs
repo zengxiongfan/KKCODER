@@ -96,6 +96,18 @@ impl ConversationState {
         tx.subscribe()
     }
 
+    /// 获取会话的当前运行状态（基于最后一条消息的角色推断）
+    pub fn get_run_status(&self, session_id: &str) -> String {
+        if let Some(session) = self.sessions.get(session_id) {
+            if let Some(last) = session.messages.last() {
+                if last.role == "user" {
+                    return "thinking".to_string();
+                }
+            }
+        }
+        "idle".to_string()
+    }
+
     /// 加载完整对话快照（首次连接时调用）
     pub fn load_snapshot(&self, session_id: &str) -> Vec<ConversationMessageDTO> {
         log_to_file(&format!("load_snapshot: called for session {}, registered sessions: {:?}", session_id, self.sessions.iter().map(|r| r.key().clone()).collect::<Vec<_>>()));
@@ -382,6 +394,7 @@ async fn handle_chat_session(
                 .unwrap_or_default()
         };
         let last_seq = snapshot.last().map(|m| m.seq).unwrap_or(0);
+        let last_role = snapshot.last().map(|m| m.role.clone()).unwrap_or_default();
         log_to_file(&format!("chat_ws: sending snapshot with {} messages, last_seq={}", snapshot.len(), last_seq));
         let snap_msg = serde_json::json!({
             "type": "conversation_snapshot",
@@ -397,6 +410,14 @@ async fn handle_chat_session(
             return;
         }
         log_to_file("chat_ws: snapshot sent successfully");
+
+        // 根据快照最后一条消息推断当前状态，发送给重连客户端
+        let inferred_status = if last_role == "user" { "thinking" } else { "idle" };
+        log_to_file(&format!("chat_ws: inferred run_status={} (last msg role={})", inferred_status, last_role));
+        let status_msg = serde_json::json!({"type": "run_status", "status": inferred_status});
+        if ws_sender.send(Message::Text(status_msg.to_string().into())).await.is_err() {
+            return;
+        }
 
         // 然后监听对话事件和 relay 消息
         loop {
@@ -522,7 +543,15 @@ pub async fn run_jsonl_watcher(
 
             // 广播新消息
             if let Some(tx) = conversation.event_txs.get(&session_id) {
-                // 先发送 run_status: idle（因为有新 assistant 消息说明 Claude 已回复）
+                // 检测到新 user 消息 → 广播 thinking 状态（桌面端直接写 PTY 时也能触发）
+                let has_user = added.iter().any(|m| m.role == "user");
+                if has_user {
+                    log_to_file(&format!("[JSONL Watcher] Sending run_status: thinking for session {}", session_id));
+                    let status_msg = serde_json::json!({"type": "run_status", "status": "thinking"});
+                    let _ = tx.send(status_msg.to_string());
+                }
+
+                // 检测到新 assistant 消息 → 广播 idle 状态
                 let has_assistant = added.iter().any(|m| m.role == "assistant");
                 if has_assistant {
                     log_to_file(&format!("[JSONL Watcher] Sending run_status: idle for session {}", session_id));

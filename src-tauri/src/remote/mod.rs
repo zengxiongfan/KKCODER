@@ -11,5 +11,7 @@ pub mod server;
 pub mod session_actor;
 #[allow(dead_code)]
 pub mod state;
+pub mod tui_detector;
+pub mod tui_watcher;
 #[allow(dead_code)]
 pub mod ws;

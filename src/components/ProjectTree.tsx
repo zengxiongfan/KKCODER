@@ -281,11 +281,26 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
       }
     };
 
+    const handleDragStart = (e: React.DragEvent) => {
+      if (node.isDir) return;
+      e.dataTransfer.setData("text/plain", `"${relativePath}" `);
+      e.dataTransfer.effectAllowed = "copy";
+      // 拖拽时给自身加半透明效果
+      (e.currentTarget as HTMLElement).classList.add("dragging");
+    };
+
+    const handleDragEnd = (e: React.DragEvent) => {
+      (e.currentTarget as HTMLElement).classList.remove("dragging");
+    };
+
     return (
       <div key={relativePath} className="tree-node-wrapper">
-        <div 
+        <div
           className={`tree-node ${node.isDir ? "directory-node" : "file-node"}`}
           style={{ paddingLeft }}
+          draggable={!node.isDir}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
           onClick={handleNodeClick}
           onContextMenu={(e) => handleContextMenu(e, relativePath, node.isDir)}
         >
