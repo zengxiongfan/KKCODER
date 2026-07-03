@@ -214,7 +214,7 @@ export const SessionHistoryPanel: React.FC<Props> = ({
 
     invoke<SessionHistoryResult>("get_session_history", {
       sessionId,
-      limit: 10000,
+      limit: 0, // 0 表示全量加载
       offset: 0,
     })
       .then((res) => {

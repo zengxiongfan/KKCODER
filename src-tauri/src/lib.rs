@@ -2019,27 +2019,32 @@ fn get_session_history(
         });
     }
 
-    // 5. 分页（offset/limit 仅在 total 超过 limit 时启用）
-    let lim = limit.unwrap_or(500);
+    // 5. 分页：limit == 0 或 >= total 表示全量加载
     let off = offset.unwrap_or(0);
+    let lim = limit.unwrap_or(0);
     if off >= total {
-        let paged: Vec<HistoryMessage> = Vec::new();
         return Ok(SessionHistoryResult {
             available: true,
             reason: None,
             session_id,
             agent_type,
             total,
-            messages: paged,
+            messages: vec![],
         });
     }
-    let end = std::cmp::min(off + lim, total);
-    let paged: Vec<HistoryMessage> = all.drain(off..end).collect();
+    let paged: Vec<HistoryMessage> = if lim == 0 || lim >= total {
+        // 全量返回
+        all.drain(off..).collect()
+    } else {
+        let end = std::cmp::min(off + lim, total);
+        all.drain(off..end).collect()
+    };
 
     log_to_file(&format!(
-        "get_session_history: returning {} messages (total={})",
+        "get_session_history: returning {} messages (total={}, limit={})",
         paged.len(),
-        total
+        total,
+        lim
     ));
 
     Ok(SessionHistoryResult {
