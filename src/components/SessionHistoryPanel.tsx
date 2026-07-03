@@ -188,6 +188,8 @@ export const SessionHistoryPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [debouncedQuery, setDebouncedQuery] = useState<string>("");
+  /** 是否显示工具调用消息（TOOL/RESULT）；默认隐藏 */
+  const [showToolCalls, setShowToolCalls] = useState<boolean>(false);
   /** 当前激活的命中索引（1-based 展示，0-based 内部存储） */
   const [currentHitIndex, setCurrentHitIndex] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -256,13 +258,17 @@ export const SessionHistoryPanel: React.FC<Props> = ({
   // 过滤消息（搜索）
   const filteredMessages = useMemo<HistoryMessage[]>(() => {
     if (!result?.messages) return [];
-    if (!debouncedQuery.trim()) return result.messages;
-    const q = debouncedQuery.toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     return result.messages.filter((m) => {
+      // 工具调用过滤：默认隐藏 tool_use / tool_result
+      if (!showToolCalls && (m.role === "tool_use" || m.role === "tool_result")) {
+        return false;
+      }
+      if (!q) return true;
       const hay = `${m.content || ""} ${m.toolName || ""} ${m.model || ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [result, debouncedQuery]);
+  }, [result, debouncedQuery, showToolCalls]);
 
   // 命中数变化时重置索引，并保证不越界
   useEffect(() => {
@@ -374,6 +380,17 @@ export const SessionHistoryPanel: React.FC<Props> = ({
               </button>
             )}
           </div>
+          <label
+            className="history-panel-tool-toggle"
+            title="显示 / 隐藏工具调用消息（TOOL / RESULT）"
+          >
+            <input
+              type="checkbox"
+              checked={showToolCalls}
+              onChange={(e) => setShowToolCalls(e.target.checked)}
+            />
+            <span>工具调用</span>
+          </label>
           <div className="history-panel-hitnav">
             {debouncedQuery && (
               <span className="history-panel-hitcount">

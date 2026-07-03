@@ -3748,6 +3748,37 @@ input:checked + .switch-slider:before {
   color: var(--text-primary);
 }
 
+/* 工具调用显示开关 */
+.history-panel-tool-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: var(--transition-smooth);
+  flex-shrink: 0;
+}
+
+.history-panel-tool-toggle:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-hover-item);
+}
+
+.history-panel-tool-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.history-panel-tool-toggle input[type="checkbox"]:checked + span {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
 .history-panel-hitnav {
   display: flex;
   align-items: center;
