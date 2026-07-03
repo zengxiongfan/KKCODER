@@ -3570,4 +3570,521 @@ input:checked + .switch-slider:before {
   font-weight: bold;
 }
 
+/* ============================================
+   会话历史面板 (Session History Panel)
+   跟随当前主题，使用 CSS 变量
+   ============================================ */
+
+/* tab-bar 最右侧固定区域：查看完整历史按钮（仅在有激活会话时显示） */
+.tab-bar-history-btn {
+  width: 28px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  margin: 0 2px 0 4px;
+  transition: var(--transition-smooth);
+}
+
+.tab-bar-history-btn:hover {
+  background-color: var(--bg-hover-item);
+  border-color: var(--border-color);
+  color: var(--color-primary);
+}
+
+.tab-bar-history-btn:active {
+  transform: scale(0.94);
+}
+
+/* 抽屉遮罩层 */
+.history-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.28);
+  z-index: 1100;
+  animation: historyPanelFadeIn 0.18s ease-out;
+}
+
+/* 抽屉主体 */
+.history-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 520px;
+  max-width: 72vw;
+  background-color: var(--bg-sidebar);
+  border-left: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  z-index: 1101;
+  display: flex;
+  flex-direction: column;
+  animation: historyPanelSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* 抽屉顶栏：仅标题 + 计数徽章 + 关闭按钮 */
+.history-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.history-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.history-panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.history-panel-count-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background-color: var(--bg-hover-item);
+  padding: 3px 9px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.history-panel-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-smooth);
+  flex-shrink: 0;
+}
+
+.history-panel-close:hover {
+  background-color: var(--bg-hover-item);
+  color: #ef4444;
+}
+
+/* 搜索行：搜索框 + 1/N 计数 + 上下条按钮 */
+.history-panel-subbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.history-panel-search {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.history-panel-search input {
+  width: 100%;
+  padding: 6px 28px 6px 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  outline: none;
+  transition: var(--transition-smooth);
+  font-family: inherit;
+}
+
+.history-panel-search input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-orange-light);
+}
+
+.history-panel-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.history-panel-search-clear:hover {
+  background-color: var(--bg-hover-item);
+  color: var(--text-primary);
+}
+
+.history-panel-hitnav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.history-panel-hitcount {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  min-width: 30px;
+  text-align: center;
+  user-select: none;
+}
+
+.history-panel-hitnav-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition-smooth);
+}
+
+.history-panel-hitnav-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover-item);
+  border-color: var(--border-color);
+  color: var(--color-primary);
+}
+
+.history-panel-hitnav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 消息列表区 */
+.history-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  scroll-behavior: smooth;
+}
+
+.history-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 40px 20px;
+  gap: 6px;
+}
+
+.history-panel-empty-icon {
+  font-size: 36px;
+  opacity: 0.5;
+  margin-bottom: 8px;
+}
+
+.history-panel-loadmore {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  padding: 12px;
+  background-color: var(--bg-main);
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+/* 单条消息卡片 */
+.history-msg {
+  background-color: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px 8px 12px;
+  border-left-width: 3px;
+  border-left-style: solid;
+  transition: var(--transition-smooth);
+}
+
+.history-msg.active-hit {
+  box-shadow: 0 0 0 2px var(--color-primary), 0 4px 12px rgba(0, 0, 0, 0.08);
+  background-color: var(--color-orange-light);
+}
+
+.history-msg.user {
+  border-left-color: #3b82f6;
+}
+
+.history-msg.assistant {
+  border-left-color: #D97757;
+}
+
+.history-msg.tool_use {
+  border-left-color: #8b5cf6;
+}
+
+.history-msg.tool_result {
+  border-left-color: #10b981;
+}
+
+.history-msg.system {
+  border-left-color: var(--text-secondary);
+}
+
+.history-msg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.history-msg-role {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 1px 7px;
+  border: 1px solid;
+  border-radius: 3px;
+  background-color: var(--bg-sidebar);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.history-msg-toolname {
+  font-size: 11.5px;
+  color: #8b5cf6;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.history-msg-time {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.history-msg-model {
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background-color: var(--bg-hover-item);
+  font-family: var(--font-mono);
+}
+
+.history-msg-body {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.history-tool-result {
+  color: var(--text-secondary);
+  background-color: var(--bg-sidebar);
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.history-tool-call {
+  margin-top: 4px;
+  background-color: var(--bg-sidebar);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.history-tool-call-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.history-tool-input {
+  margin: 0;
+  padding: 8px 10px;
+  background-color: var(--bg-main);
+  border-top: 1px solid var(--border-color);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  color: var(--text-primary);
+  max-height: 240px;
+  overflow-y: auto;
+  white-space: pre;
+  word-break: normal;
+}
+
+.history-tool-toggle {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 4px;
+  font-family: inherit;
+}
+
+.history-tool-toggle:hover {
+  text-decoration: underline;
+}
+
+.history-jump-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--color-primary);
+  font-size: 10.5px;
+  cursor: pointer;
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-family: inherit;
+  transition: var(--transition-smooth);
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.history-jump-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover-item);
+  border-color: var(--border-color);
+}
+
+.history-jump-btn:disabled {
+  color: var(--text-secondary);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.history-jump-btn:disabled:hover {
+  background-color: transparent;
+}
+
+/* 搜索关键词高亮 */
+.history-search-highlight {
+  background-color: var(--color-orange-light);
+  color: var(--color-orange);
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* 抽屉底部 */
+.history-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-color);
+  background-color: var(--bg-main);
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.history-panel-footer kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background-color: var(--bg-sidebar);
+}
+
+.history-panel-footer-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+  font-family: var(--font-mono);
+}
+
+/* 滚动条美化（与项目风格保持一致） */
+.history-panel-body::-webkit-scrollbar,
+.history-tool-input::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.history-panel-body::-webkit-scrollbar-thumb,
+.history-tool-input::-webkit-scrollbar-thumb {
+  background-color: var(--border-color);
+  border-radius: 4px;
+}
+
+.history-panel-body::-webkit-scrollbar-thumb:hover,
+.history-tool-input::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-secondary);
+}
+
+/* 入场动画 */
+@keyframes historyPanelSlideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes historyPanelFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 

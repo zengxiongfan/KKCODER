@@ -459,6 +459,47 @@ struct ContentSearchResult {
     snippets: Vec<String>,
 }
 
+/// 单条结构化的会话历史消息（用于历史面板展示）
+#[derive(serde::Serialize, Clone)]
+struct HistoryMessage {
+    /// 消息唯一 id（来自 JSONL 的 uuid 字段）
+    id: String,
+    /// 角色：user / assistant / tool_use / tool_result / system
+    role: String,
+    /// ISO8601 时间戳（来自 JSONL 的 timestamp 字段）
+    timestamp: Option<String>,
+    /// 文本内容（user 消息为纯文本，assistant 合并 text blocks）
+    content: String,
+    /// 工具名（仅 tool_use 角色有值，例如 Read / Edit / Bash）
+    #[serde(rename = "toolName")]
+    tool_name: Option<String>,
+    /// 工具调用入参（仅 tool_use 角色有值）
+    #[serde(rename = "toolInput")]
+    tool_input: Option<serde_json::Value>,
+    /// 工具调用结果（仅 tool_result 角色有值）
+    #[serde(rename = "toolResult")]
+    tool_result: Option<String>,
+    /// 模型名（仅 assistant 消息有值，例如 claude-sonnet-4-5）
+    model: Option<String>,
+    /// 用于在终端 buffer 中近似定位的短锚点（前 40 个非空白字符，user/assistant 有值；tool 类型为空）
+    anchor: String,
+}
+
+/// 会话历史结果（用于右侧抽屉面板）
+#[derive(serde::Serialize)]
+struct SessionHistoryResult {
+    /// 文件是否可读；false 时前端展示 reason 提示
+    available: bool,
+    /// 不可用时的原因：not_found / empty / agent_not_supported / no_agent_id
+    reason: Option<String>,
+    #[serde(rename = "sessionId")]
+    session_id: String,
+    #[serde(rename = "agentType")]
+    agent_type: String,
+    total: usize,
+    messages: Vec<HistoryMessage>,
+}
+
 /// 增强全局聊天记录搜索：并行检索所有非删除状态会话中的实际聊天记录内容，并返回匹配高亮片段 (最多 3 条)
 #[tauri::command]
 fn search_session_contents(query: String) -> Result<Vec<ContentSearchResult>, String> {
@@ -1690,6 +1731,350 @@ pub(crate) fn extract_assistant_text(obj: &serde_json::Value) -> String {
         return parts.join("\n");
     }
     String::new()
+}
+
+/// 完整解析 Claude Code JSONL 文件为结构化历史消息列表
+/// - 跳过 file_history_snapshot 等无关消息
+/// - assistant 消息的 content 数组中 text block 合并、tool_use block 拆为独立消息
+/// - user 消息的 content 数组中 tool_result block 拆为独立消息
+pub(crate) fn read_claude_history_full(jsonl_path: &std::path::Path) -> Vec<HistoryMessage> {
+    let file = match std::fs::File::open(jsonl_path) {
+        Ok(f) => f,
+        Err(_) => return vec![],
+    };
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+    let mut out: Vec<HistoryMessage> = Vec::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if line.is_empty() {
+            continue;
+        }
+        let obj: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let typ = obj.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if typ.is_empty() {
+            continue;
+        }
+
+        let id = obj.get("uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let timestamp = obj.get("timestamp")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if typ == "user" {
+            let message = obj.get("message");
+            let content_val = message.and_then(|m| m.get("content"));
+
+            if let Some(arr) = content_val.and_then(|c| c.as_array()) {
+                // 提取纯文本 user 输入（不包含 tool_result）
+                let text_parts: Vec<String> = arr.iter()
+                    .filter_map(|block| {
+                        if block.get("type")?.as_str()? == "text" {
+                            Some(block.get("text")?.as_str()?.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let text = text_parts.join("\n").trim().to_string();
+                if !text.is_empty() {
+                    out.push(HistoryMessage {
+                        id: id.clone(),
+                        role: "user".to_string(),
+                        timestamp: timestamp.clone(),
+                        content: text.clone(),
+                        tool_name: None,
+                        tool_input: None,
+                        tool_result: None,
+                        model: None,
+                        anchor: extract_anchor(&text),
+                    });
+                }
+                // 拆出 tool_result 块
+                for block in arr.iter() {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                        let tr_content = block.get("content");
+                        let tr_text = if let Some(s) = tr_content.and_then(|c| c.as_str()) {
+                            s.to_string()
+                        } else if let Some(arr2) = tr_content.and_then(|c| c.as_array()) {
+                            arr2.iter()
+                                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        } else {
+                            String::new()
+                        };
+                        let tr_id = block.get("tool_use_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        out.push(HistoryMessage {
+                            id: format!("{}#tr", tr_id),
+                            role: "tool_result".to_string(),
+                            timestamp: timestamp.clone(),
+                            content: tr_text.trim().to_string(),
+                            tool_name: None,
+                            tool_input: None,
+                            tool_result: Some(tr_id),
+                            model: None,
+                            anchor: String::new(),
+                        });
+                    }
+                }
+            } else if let Some(content) = content_val.and_then(|c| c.as_str()) {
+                // content 是字符串
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    out.push(HistoryMessage {
+                        id,
+                        role: "user".to_string(),
+                        timestamp,
+                        content: trimmed.to_string(),
+                        tool_name: None,
+                        tool_input: None,
+                        tool_result: None,
+                        model: None,
+                        anchor: extract_anchor(trimmed),
+                    });
+                }
+            }
+        } else if typ == "assistant" {
+            let message = obj.get("message");
+            let model = message.and_then(|m| m.get("model"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let content_val = message.and_then(|m| m.get("content"));
+
+            if let Some(arr) = content_val.and_then(|c| c.as_array()) {
+                // 合并所有 text block
+                let text_parts: Vec<String> = arr.iter()
+                    .filter_map(|block| {
+                        if block.get("type")?.as_str()? == "text" {
+                            Some(block.get("text")?.as_str()?.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let text = text_parts.join("\n").trim().to_string();
+                if !text.is_empty() {
+                    out.push(HistoryMessage {
+                        id: id.clone(),
+                        role: "assistant".to_string(),
+                        timestamp: timestamp.clone(),
+                        content: text.clone(),
+                        tool_name: None,
+                        tool_input: None,
+                        tool_result: None,
+                        model: model.clone(),
+                        anchor: extract_anchor(&text),
+                    });
+                }
+                // 拆出每个 tool_use 块
+                for block in arr.iter() {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                        let tool_name = block.get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let tool_input = block.get("input").cloned();
+                        let tu_id = block.get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        out.push(HistoryMessage {
+                            id: tu_id,
+                            role: "tool_use".to_string(),
+                            timestamp: timestamp.clone(),
+                            content: format!("⏵ {}", tool_name),
+                            tool_name: Some(tool_name),
+                            tool_input,
+                            tool_result: None,
+                            model: model.clone(),
+                            anchor: String::new(),
+                        });
+                    }
+                }
+            } else if let Some(content) = content_val.and_then(|c| c.as_str()) {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    out.push(HistoryMessage {
+                        id,
+                        role: "assistant".to_string(),
+                        timestamp,
+                        content: trimmed.to_string(),
+                        tool_name: None,
+                        tool_input: None,
+                        tool_result: None,
+                        model,
+                        anchor: extract_anchor(trimmed),
+                    });
+                }
+            }
+        }
+        // 其它 type（file_history_snapshot, last-prompt 等）忽略
+    }
+
+    out
+}
+
+/// 获取某个会话的完整历史（按时间正序，支持分页）
+/// 当前仅实现 Claude Code agent；其它 agent_type 返回 available=false
+#[tauri::command]
+fn get_session_history(
+    session_id: String,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<SessionHistoryResult, String> {
+    log_to_file(&format!(
+        "get_session_history called: session_id={}, limit={:?}, offset={:?}",
+        session_id, limit, offset
+    ));
+
+    // 1. 从 SQLite 读取会话元数据
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT type, agent_session_id, path FROM sessions WHERE id = ?1")
+        .map_err(|e| e.to_string())?;
+    let row = stmt
+        .query_row([&session_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("session not found: {}", e))?;
+    let (agent_type, agent_session_id, project_path) = row;
+
+    // 2. Pi agent 暂未支持
+    if agent_type != "claude" {
+        log_to_file(&format!(
+            "get_session_history: agent_type={} not yet supported",
+            agent_type
+        ));
+        return Ok(SessionHistoryResult {
+            available: false,
+            reason: Some("agent_not_supported".to_string()),
+            session_id,
+            agent_type,
+            total: 0,
+            messages: vec![],
+        });
+    }
+
+    if agent_session_id.is_empty() {
+        log_to_file("get_session_history: empty agent_session_id");
+        return Ok(SessionHistoryResult {
+            available: false,
+            reason: Some("no_agent_id".to_string()),
+            session_id,
+            agent_type,
+            total: 0,
+            messages: vec![],
+        });
+    }
+
+    // 3. 查找 JSONL 文件
+    let jsonl_path = match find_claude_jsonl(&agent_session_id, &project_path) {
+        Some(p) => p,
+        None => {
+            log_to_file(&format!(
+                "get_session_history: jsonl not found for session={} path={}",
+                session_id, project_path
+            ));
+            return Ok(SessionHistoryResult {
+                available: false,
+                reason: Some("not_found".to_string()),
+                session_id,
+                agent_type,
+                total: 0,
+                messages: vec![],
+            });
+        }
+    };
+
+    // 4. 解析为结构化消息
+    let mut all = read_claude_history_full(&jsonl_path);
+    let total = all.len();
+    if total == 0 {
+        return Ok(SessionHistoryResult {
+            available: true,
+            reason: Some("empty".to_string()),
+            session_id,
+            agent_type,
+            total: 0,
+            messages: vec![],
+        });
+    }
+
+    // 5. 分页（offset/limit 仅在 total 超过 limit 时启用）
+    let lim = limit.unwrap_or(500);
+    let off = offset.unwrap_or(0);
+    if off >= total {
+        let paged: Vec<HistoryMessage> = Vec::new();
+        return Ok(SessionHistoryResult {
+            available: true,
+            reason: None,
+            session_id,
+            agent_type,
+            total,
+            messages: paged,
+        });
+    }
+    let end = std::cmp::min(off + lim, total);
+    let paged: Vec<HistoryMessage> = all.drain(off..end).collect();
+
+    log_to_file(&format!(
+        "get_session_history: returning {} messages (total={})",
+        paged.len(),
+        total
+    ));
+
+    Ok(SessionHistoryResult {
+        available: true,
+        reason: None,
+        session_id,
+        agent_type,
+        total,
+        messages: paged,
+    })
+}
+
+/// 从消息文本中提取用于在终端 buffer 中定位的短锚点
+/// - 过滤 ANSI 转义序列 (ESC [ ... letter)
+/// - 取前 40 个非空白字符
+fn extract_anchor(content: &str) -> String {
+    let stripped: String = content
+        .chars()
+        .scan(false, |in_esc, c| {
+            if *in_esc {
+                if c.is_ascii_alphabetic() {
+                    *in_esc = false;
+                }
+                Some(None)
+            } else if c == '\u{1b}' {
+                *in_esc = true;
+                Some(None)
+            } else {
+                Some(Some(c))
+            }
+        })
+        .filter_map(|x| x)
+        .collect();
+    let trimmed: String = stripped.trim().chars().take(40).collect();
+    trimmed
 }
 
 // --- 启发式标题生成 (移植自 rename 的 heuristic namer) ---
@@ -3258,6 +3643,7 @@ pub fn run() {
             auto_rename_sessions,
             llm_rename_sessions,
             search_session_contents,
+            get_session_history,
             read_project_files,
             read_project_directory,
             search_project_files,

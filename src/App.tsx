@@ -7,6 +7,7 @@ import { NewSessionModal } from "./components/NewSessionModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { MdEditorModal } from "./components/MdEditorModal";
 import { ProjectTree } from "./components/ProjectTree";
+import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { getHighlightedLines } from "./utils/highlighter";
 import { FileText } from "lucide-react";
@@ -110,6 +111,15 @@ function App() {
   const [showMdEditor, setShowMdEditor] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [newSessionIds, setNewSessionIds] = useState<string[]>([]);
+
+  // 会话历史面板状态
+  const [historyPanelOpen, setHistoryPanelOpen] = useState<boolean>(false);
+  const [historySessionId, setHistorySessionId] = useState<string>("");
+
+  const openHistoryPanel = useCallback((sessionId: string) => {
+    setHistorySessionId(sessionId);
+    setHistoryPanelOpen(true);
+  }, []);
 
   // AI回答完成的闪烁状态
   const [glowingSessionIds, setGlowingSessionIds] = useState<string[]>([]);
@@ -1584,6 +1594,24 @@ function App() {
     };
   }, [showThemeDropdown]);
 
+  // 全局快捷键 Ctrl+Shift+H 打开当前激活会话的历史面板
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMod = e.ctrlKey || e.metaKey;
+      if (isMod && e.shiftKey && e.key.toLowerCase() === "h") {
+        if (historyPanelOpen) {
+          setHistoryPanelOpen(false);
+        } else if (activeSessionId) {
+          openHistoryPanel(activeSessionId);
+        }
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [activeSessionId, historyPanelOpen, openHistoryPanel]);
+
   // 监听主题发生变动的全局广播事件
   useEffect(() => {
     const handleThemeEvent = (e: Event) => {
@@ -2297,6 +2325,22 @@ function App() {
                 );
               })}
             </div>
+
+            {/* tab-bar 最右侧固定区域：查看历史按钮（仅在有激活会话时显示） */}
+            {activeSessionId && (
+              <div className="tab-bar-actions">
+                <button
+                  className="tab-bar-history-btn"
+                  title="查看会话完整历史"
+                  onClick={() => openHistoryPanel(activeSessionId)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 终端区 / 空白提示状态 (采用 Keep-Alive 常驻 DOM 设计，防止切换 Tab 时重新初始化) */}
@@ -2698,6 +2742,40 @@ function App() {
           </div>
         </main>
 
+        {/* 会话历史面板（右侧抽屉） */}
+        {historyPanelOpen && (() => {
+          const targetSession = sessions.find((sess) => sess.id === historySessionId);
+          if (!targetSession) return null;
+          return (
+            <SessionHistoryPanel
+              open={historyPanelOpen}
+              sessionId={historySessionId}
+              sessionName={targetSession.name}
+              projectPath={targetSession.path}
+              onClose={() => setHistoryPanelOpen(false)}
+              onJumpToTerminal={(anchor) => {
+                // 1. 关闭抽屉
+                setHistoryPanelOpen(false);
+                // 2. 切到目标 tab（如果还没激活）
+                if (activeSessionId !== historySessionId) {
+                  if (!openTabIds.includes(historySessionId)) {
+                    setOpenTabIds((prev) => [...prev, historySessionId]);
+                  }
+                  setActiveSessionId(historySessionId);
+                }
+                // 3. 等 xterm 渲染完成后再派发定位事件（延时两拍：DOM 更新 + fit）
+                setTimeout(() => {
+                  window.dispatchEvent(
+                    new CustomEvent("kkcoder-scroll-to-anchor", {
+                      detail: { sessionId: historySessionId, anchor },
+                    })
+                  );
+                }, 220);
+              }}
+            />
+          );
+        })()}
+
         {showProjectTree && !activeSession?.isTemp && (
           <>
             <div 
@@ -2938,6 +3016,15 @@ function App() {
                 }}
               >
                 在侧边栏中定位
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  openHistoryPanel(tabContextMenu.sessionId);
+                  setTabContextMenu(null);
+                }}
+              >
+                查看完整历史
               </button>
               <div style={{ borderBottom: "1px dashed var(--border-color)", margin: "4px 6px" }} />
               <button

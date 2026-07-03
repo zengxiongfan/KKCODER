@@ -1045,6 +1045,86 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     };
   }, [isActive]);
 
+  // 监听"跳到终端锚点"事件：在 xterm buffer 中搜索并滚动到对应行
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<{ sessionId: string; anchor: string }>;
+      const detail = ce.detail;
+      if (!detail || detail.sessionId !== sessionId || !detail.anchor) return;
+
+      const term = xtermRef.current;
+      if (!term) {
+        log(`[scroll-to-anchor] xterm not ready for session=${sessionId}`);
+        return;
+      }
+
+      // 退避重试：xterm 可能还在重新 fit / buffer 未稳定
+      const tryScroll = (attempt: number) => {
+        const termNow = xtermRef.current;
+        if (!termNow) return;
+        const buffer = termNow.buffer.active;
+        const total = buffer.length;
+
+        // 优化匹配：用前 20 字符作为关键词，过长容易匹配不到
+        const needle = detail.anchor.slice(0, 20);
+        if (!needle) {
+          log(`[scroll-to-anchor] empty anchor`);
+          return;
+        }
+
+        let foundY = -1;
+        // 优先在可视区附近查找，再向两端扩展
+        const viewportY = buffer.viewportY;
+        const size = termNow.rows;
+        const startY = Math.max(0, viewportY - 200);
+        const endY = Math.min(total, viewportY + size + 200);
+
+        for (let y = startY; y < endY; y++) {
+          const line = buffer.getLine(y);
+          if (!line) continue;
+          const text = line.translateToString(true);
+          if (text && text.includes(needle)) {
+            foundY = y;
+            break;
+          }
+        }
+        // 如果附近没找到，全局扫描兜底（限 5k 行以避免卡顿）
+        if (foundY < 0 && total < 5000) {
+          for (let y = 0; y < total; y++) {
+            const line = buffer.getLine(y);
+            if (!line) continue;
+            const text = line.translateToString(true);
+            if (text && text.includes(needle)) {
+              foundY = y;
+              break;
+            }
+          }
+        }
+
+        if (foundY >= 0) {
+          log(`[scroll-to-anchor] found at y=${foundY} for anchor="${needle}"`);
+          // 让该行尽量落在视口中央
+          const targetY = Math.max(0, foundY - Math.floor(size / 2));
+          termNow.scrollToLine(targetY);
+        } else {
+          if (attempt < 2) {
+            log(`[scroll-to-anchor] not found, retry ${attempt + 1}`);
+            setTimeout(() => tryScroll(attempt + 1), 200);
+          } else {
+            log(`[scroll-to-anchor] not found after retries, anchor="${needle}"`);
+            // 找不到时仅记录日志，UI 不阻塞
+          }
+        }
+      };
+
+      // 第一次延迟 80ms 等待 fit 完成
+      setTimeout(() => tryScroll(0), 80);
+    };
+
+    window.addEventListener("kkcoder-scroll-to-anchor", handler);
+    return () => window.removeEventListener("kkcoder-scroll-to-anchor", handler);
+  }, [sessionId]);
+
   return (
     <div className={`terminal-container agent-type-${agentType}`}>
       <div className="terminal-ref" ref={terminalRef} />
