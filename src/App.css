@@ -4167,9 +4167,9 @@ input:checked + .switch-slider:before {
 }
 
 .aside-tab {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
-  padding: 4px 12px;
+  padding: 5px 14px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
