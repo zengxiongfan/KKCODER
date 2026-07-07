@@ -38,5 +38,11 @@ rand = "0.8"
 dashmap = "6"
 async-trait = "0.1"
 futures-util = "0.3"
+# Git 仓库操作（libgit2）
+git2 = "0.19"
+# 文件系统监听 + 去抖：fs-watcher 替代 Git 变更面板的定时轮询
+notify = "6"
+notify-debouncer-mini = "0.4"
+log = "0.4"
 
 

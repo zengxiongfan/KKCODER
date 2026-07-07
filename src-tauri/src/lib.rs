@@ -6,6 +6,8 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
 use std::io::Write;
 
 mod remote;
+mod commands;
+mod git_watcher;
 
 // 极其可靠的本地调试文件日志输出器，自动写入 kkcoder_debug.log 以便于闪退后追溯
 fn log_to_file(message: &str) {
@@ -3504,6 +3506,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(pty_manager)
         .manage(remote::frp::FrpManager::new())
+        .manage(git_watcher::GitWatcherBridge::new())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             use tauri::Manager;
@@ -3674,7 +3677,30 @@ pub fn run() {
             get_local_ip,
             start_frp,
             stop_frp,
-            get_frp_status
+            get_frp_status,
+            // Git 操作命令
+            commands::git::get_current_git_branch,
+            commands::git::git_get_changes,
+            commands::git::git_get_file_diff,
+            commands::git::git_discard_file,
+            commands::git::git_revert_hunk,
+            commands::git::git_revert_lines,
+            commands::git::git_stage_file,
+            commands::git::git_unstage_file,
+            commands::git::git_stage_all,
+            commands::git::git_unstage_all,
+            commands::git::git_stage_paths,
+            commands::git::git_unstage_paths,
+            commands::git::git_commit,
+            commands::git::git_commit_paths,
+            commands::git::git_branch_status,
+            commands::git::git_push,
+            commands::git::git_pull,
+            commands::git::git_pull_abort,
+            commands::git::git_rebase_continue,
+            commands::git::git_list_repositories,
+            commands::git::git_watch_start,
+            commands::git::git_watch_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

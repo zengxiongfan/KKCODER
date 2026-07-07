@@ -7,6 +7,7 @@ import { NewSessionModal } from "./components/NewSessionModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { MdEditorModal } from "./components/MdEditorModal";
 import { ProjectTree } from "./components/ProjectTree";
+import { GitPanel } from "./components/git/GitPanel";
 import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { getHighlightedLines } from "./utils/highlighter";
@@ -201,6 +202,10 @@ function App() {
   const projectTreeAsideRef = useRef<HTMLElement>(null);
   const [showProjectTree, setShowProjectTree] = useState<boolean>(() => {
     return localStorage.getItem("kkcoder_show_project_tree") === "true";
+  });
+  // 右侧面板 Tab 切换：'files' = 项目文件树, 'git' = Git 变更面板
+  const [rightPanelTab, setRightPanelTab] = useState<"files" | "git">(() => {
+    return localStorage.getItem("kkcoder_right_panel_tab") === "git" ? "git" : "files";
   });
   const [previewFile, setPreviewFile] = useState<{ 
     path: string; 
@@ -2789,28 +2794,66 @@ function App() {
               style={{ width: `${projectTreeWidth}px` }}
             >
               <div className="project-tree-aside-header">
-                <span className="aside-header-title">项目文件</span>
+                <div className="aside-tabs">
+                  <button
+                    className={`aside-tab ${rightPanelTab === "files" ? "active" : ""}`}
+                    onClick={() => {
+                      setRightPanelTab("files");
+                      localStorage.setItem("kkcoder_right_panel_tab", "files");
+                    }}
+                  >
+                    文件
+                  </button>
+                  <button
+                    className={`aside-tab ${rightPanelTab === "git" ? "active" : ""}`}
+                    onClick={() => {
+                      setRightPanelTab("git");
+                      localStorage.setItem("kkcoder_right_panel_tab", "git");
+                    }}
+                  >
+                    Git
+                  </button>
+                </div>
                 {activeSession && activeSession.path && (
                   <span className="aside-header-path" title={activeSession.path}>
                     {activeSession.path.split(/[/\\]/).pop()}
                   </span>
                 )}
               </div>
-              {activeSession && activeSession.path ? (
-                <ProjectTree
-                  projectPath={activeSession.path}
-                  onFileClick={handleFileClick}
-                  onInsertPathToTerminal={handleInsertPathToTerminal}
-                />
-              ) : (
-                <div className="tree-placeholder-container">
-                  <div className="tree-placeholder-icon">📂</div>
-                  <div className="tree-placeholder-title">未关联项目文件夹</div>
-                  <div className="tree-placeholder-desc">
-                    请在左侧新建或选择一个关联了本地路径的会话，以在此处浏览项目文件树。
-                  </div>
-                </div>
-              )}
+              <div className="aside-tab-content">
+                {rightPanelTab === "files" ? (
+                  activeSession && activeSession.path ? (
+                    <ProjectTree
+                      projectPath={activeSession.path}
+                      onFileClick={handleFileClick}
+                      onInsertPathToTerminal={handleInsertPathToTerminal}
+                    />
+                  ) : (
+                    <div className="tree-placeholder-container">
+                      <div className="tree-placeholder-icon">📂</div>
+                      <div className="tree-placeholder-title">未关联项目文件夹</div>
+                      <div className="tree-placeholder-desc">
+                        请在左侧新建或选择一个关联了本地路径的会话，以在此处浏览项目文件树。
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  activeSession && activeSession.path ? (
+                    <GitPanel
+                      projectPath={activeSession.path}
+                      onInsertPathToTerminal={handleInsertPathToTerminal}
+                    />
+                  ) : (
+                    <div className="tree-placeholder-container">
+                      <div className="tree-placeholder-icon">📂</div>
+                      <div className="tree-placeholder-title">未关联项目文件夹</div>
+                      <div className="tree-placeholder-desc">
+                        请在左侧新建或选择一个关联了本地路径的会话，以在此处查看 Git 变更。
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
             </aside>
           </>
         )}
