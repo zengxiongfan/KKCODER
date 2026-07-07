@@ -2813,7 +2813,7 @@ function App() {
                     }}
                   >
                     <GitBranch size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                    Git
+                    变更
                   </button>
                 </div>
                 {activeSession && activeSession.path && (
