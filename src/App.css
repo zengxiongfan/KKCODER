@@ -3073,13 +3073,13 @@ input:checked + .switch-slider:before {
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   padding: 4px 0;
-  min-width: 160px;
+  min-width: 180px;
   animation: fadeInMenu 0.12s ease-out;
 }
 
 .git-context-menu button {
   width: 100%;
-  padding: 6px 12px;
+  padding: 8px 16px;
   font-size: 12px;
   color: var(--text-primary);
   background: transparent;
@@ -3090,7 +3090,7 @@ input:checked + .switch-slider:before {
 }
 
 .git-context-menu button:hover {
-  background-color: var(--bg-hover-item);
+  background-color: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
 }
 
 .git-context-menu .menu-divider {
@@ -4318,12 +4318,14 @@ input:checked + .switch-slider:before {
   right: 0;
   top: 100%;
   z-index: 20;
-  margin-top: 2px;
-  min-width: 130px;
+  margin-top: 4px;
+  min-width: 160px;
+  max-height: 280px;
+  overflow-y: auto;
   background: var(--bg-sidebar, #1e1e2e);
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  padding: 3px;
+  padding: 4px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
@@ -4332,7 +4334,7 @@ input:checked + .switch-slider:before {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 6px 12px;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -4344,11 +4346,12 @@ input:checked + .switch-slider:before {
 }
 
 .git-dropdown-item:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
 }
 
 .git-dropdown-item.active {
-  color: #4ade80;
+  color: var(--color-cyan, #60a5fa);
+  background: rgba(96, 165, 250, 0.13);
 }
 
 .git-dropdown-item span {
@@ -4415,20 +4418,20 @@ input:checked + .switch-slider:before {
 .git-repo-btn {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
-  padding: 3px 6px;
+  padding: 5px 8px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.15s;
 }
 
 .git-repo-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
   color: var(--text-primary);
 }
 
@@ -4446,9 +4449,10 @@ input:checked + .switch-slider:before {
 }
 
 .git-repo-branch {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text-secondary);
   flex-shrink: 0;
+  opacity: 0.7;
 }
 
 /* ── 摘要（原始：text-[10px] px-2 py-1.5） ── */
@@ -4767,7 +4771,8 @@ input:checked + .switch-slider:before {
 }
 
 .git-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
+  opacity: 0.85;
 }
 
 .git-btn:disabled {

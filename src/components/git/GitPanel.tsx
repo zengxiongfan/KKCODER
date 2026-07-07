@@ -64,8 +64,8 @@ interface GitBranchStatus {
 }
 
 interface GitRepoInfo {
-  relative_path: string;
-  absolute_path: string;
+  relativePath: string;
+  absolutePath: string;
   branch: string | null;
 }
 
@@ -578,8 +578,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
 
   // ── 计算属性 ──
   const repoPath = activeRepoPath ?? projectPath;
-  const activeRepo = activeRepoPath ? repositories.find((r) => r.absolute_path === activeRepoPath) : null;
-  const activeRepoLabel = activeRepo?.relative_path || projectPath.split(/[\\/]/).filter(Boolean).pop() || "根仓库";
+  const activeRepo = activeRepoPath ? repositories.find((r) => r.absolutePath === activeRepoPath) : null;
+  const rootRepoLabel = projectPath?.split(/[\\/]/).filter(Boolean).pop() || "根仓库";
+  const activeRepoLabel = activeRepo?.relativePath || rootRepoLabel;
 
   const allCount = changes.length;
   const modifiedCount = changes.filter((c) => c.status === "M").length;
@@ -701,14 +702,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     await Promise.all([fetchChanges(false), fetchBranchStatus(), fetchRepositories()]);
   }, [fetchChanges, fetchBranchStatus, fetchRepositories]);
 
-  // 初始加载 + 项目切换
+  // 初始加载 + 项目切换（仅依赖 projectPath，避免 refresh 引用变化导致循环重置）
   useEffect(() => {
     projectPathRef.current = projectPath;
     setActiveRepoPath(null);
     setSelectedUntracked(new Set());
     setDeselectedAdded(new Set());
-    refresh();
-  }, [projectPath, refresh]);
+    fetchChanges(false);
+    fetchBranchStatus();
+    fetchRepositories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectPath]);
 
   // fs-watcher
   useEffect(() => {
@@ -786,6 +790,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
 
     return () => observer.disconnect();
   }, [changes.length]);
+
+  // 仓库切换后自动刷新变更列表与分支状态
+  const prevActiveRepoPath = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevActiveRepoPath.current !== activeRepoPath && projectPath) {
+      prevActiveRepoPath.current = activeRepoPath;
+      fetchChanges(true);
+      fetchBranchStatus();
+    }
+  }, [activeRepoPath, projectPath, fetchChanges, fetchBranchStatus]);
+
 
   // ── 用户操作 ──
 
@@ -1148,7 +1163,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             className="git-repo-btn"
             onClick={() => setRepoMenuOpen(!repoMenuOpen)}
           >
-            <FolderGit2 size={10} />
+            <FolderGit2 size={13} />
             <span className="git-repo-label">{activeRepoLabel}</span>
             <ChevronDown size={8} />
           </button>
@@ -1157,16 +1172,16 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
               <div className="git-dropdown-overlay" onClick={() => setRepoMenuOpen(false)} />
               <div className="git-dropdown-menu git-repo-menu">
                 {repositories.map((repo) => {
-                  const isRoot = repo.relative_path === "";
-                  const selected = isRoot ? activeRepoPath === null : activeRepoPath === repo.absolute_path;
-                  const label = isRoot ? projectPath.split(/[\\/]/).filter(Boolean).pop() || "根仓库" : repo.relative_path;
+                  const isRoot = repo.relativePath === "";
+                  const selected = isRoot ? activeRepoPath === null : activeRepoPath === repo.absolutePath;
+                  const label = isRoot ? projectPath.split(/[\\/]/).filter(Boolean).pop() || "根仓库" : repo.relativePath;
                   return (
                     <button
-                      key={repo.absolute_path}
+                      key={repo.absolutePath}
                       className={`git-dropdown-item ${selected ? "active" : ""}`}
                       onClick={() => {
                         setRepoMenuOpen(false);
-                        setActiveRepoPath(isRoot ? null : repo.absolute_path);
+                        setActiveRepoPath(isRoot ? null : repo.absolutePath);
                         setSelectedUntracked(new Set());
                         setDeselectedAdded(new Set());
                       }}
