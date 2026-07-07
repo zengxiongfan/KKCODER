@@ -2138,7 +2138,7 @@ function App() {
                 setShowProjectTree(newVal);
                 localStorage.setItem("kkcoder_show_project_tree", String(newVal));
               }}
-              title={showProjectTree ? "关闭工作区文件树" : "打开工作区文件树"}
+              title={showProjectTree ? "关闭工作区面板" : "打开工作区面板"}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
