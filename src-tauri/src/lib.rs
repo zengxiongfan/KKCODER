@@ -54,7 +54,7 @@ struct Session {
     project: String,
     path: String,
     #[serde(rename = "type")]
-    session_type: String, // "claude" or "pi"
+    session_type: String, // "claude" or "codex"
     #[serde(rename = "agentSessionId")]
     agent_session_id: String,
     #[serde(rename = "createdAt", skip_serializing_if = "Option::is_none")]
@@ -433,7 +433,7 @@ fn cleanup_empty_sessions() -> Result<usize, String> {
                 }
             }
         } else {
-            // 其他类型（如 Pi）：直接根据数据库时间戳判断是否从未有过对话
+            // 其他类型（如 Codex）：直接根据数据库时间戳判断是否从未有过对话
             last_user_msg_at.is_none() || last_user_msg_at == created_at
         };
 
@@ -1054,11 +1054,14 @@ fn spawn_terminal(
         } else {
             format!("claude --dangerously-skip-permissions --session-id \"{}\"\r\n", agent_session_id)
         }
-    } else if agent_type == "pi" {
+    } else if agent_type == "codex" {
         if is_reopen {
-            format!("pi --session \"{}\"\r\n", agent_session_id)
+            // Codex 的 resume 只支持恢复最近一次会话（全局），
+            // 无法像 Claude 那样用 --session-id 精确恢复到某次会话。
+            // TODO: 后续可解析 Codex 输出中的 session_id: xxx，存到 agent_session_id，实现精确 resume。
+            "codex --resume\r\n".to_string()
         } else {
-            "pi\r\n".to_string()
+            "codex\r\n".to_string()
         }
     } else {
         "\r\n".to_string()
@@ -1130,29 +1133,31 @@ fn spawn_terminal(
         });
     }
 
-    // 如果是首次创建的 Pi 会话，则延时 2.0 秒等 Pi 客户端完全拉起后，自动键入 /session 获取并存储 session ID
-    if !is_reopen && agent_type == "pi" {
-        log_to_file("!is_reopen is true for Pi: spawning background thread for `/session` writing...");
+    // 如果是重新唤起已有的 Codex 会话，则延时 2.5 秒等 Codex 客户端完全拉起后，自动键入 `codex --resume` 还原最近一次会话
+    if is_reopen && agent_type == "codex" {
+        log_to_file("is_reopen is true for Codex: spawning background thread for `codex --resume` writing...");
         let sessions_clone = state.sessions.clone();
         let session_id_clone = session_id.clone();
         std::thread::spawn(move || {
-            log_to_file(&format!("Background `/session` thread spawned. spawn_token={}. Sleeping 2000ms...", spawn_token));
-            std::thread::sleep(std::time::Duration::from_millis(2000));
-            log_to_file("Background `/session` thread sleep finished. Locking sessions map...");
+            log_to_file(&format!("Background Codex-resume thread spawned. spawn_token={}. Sleeping 2500ms...", spawn_token));
+            std::thread::sleep(std::time::Duration::from_millis(2500));
+            log_to_file("Background Codex-resume thread sleep finished. Locking sessions map...");
             let mut sessions = sessions_clone.lock().unwrap();
             if let Some(session) = sessions.get_mut(&session_id_clone) {
                 if session.spawn_token != spawn_token {
-                    log_to_file(&format!("Stale spawn token detected (active={}, thread={}). Safely skipping session query.", session.spawn_token, spawn_token));
+                    log_to_file(&format!("Stale spawn token detected (active={}, thread={}). Safely skipping codex resume typing.", session.spawn_token, spawn_token));
                     return;
                 }
 
-                log_to_file("Background thread: writing /session cmd...");
+                log_to_file("Background thread: writing `codex --resume` cmd...");
                 {
                     let mut w = session.writer.lock().unwrap();
-                    w.write_all(b"/session\r\n").ok();
+                    w.write_all(b"codex --resume\r\n").ok();
                     w.flush().ok();
                 }
-                log_to_file("Background thread: /session cmd written!");
+                log_to_file("Background thread: `codex --resume` cmd written!");
+            } else {
+                log_to_file("Background thread error: active session not found inside sessions map!");
             }
         });
     }
@@ -1587,6 +1592,47 @@ fn get_claude_version() -> Result<String, String> {
     }
 }
 
+#[tauri::command]
+fn get_codex_version() -> Result<String, String> {
+    use std::process::Command;
+
+    let run_cmd = || -> Result<String, std::io::Error> {
+        #[cfg(target_os = "windows")]
+        let output = {
+            use std::os::windows::process::CommandExt;
+            Command::new("cmd")
+                .args(&["/C", "codex --version"])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output()?
+        };
+        #[cfg(not(target_os = "windows"))]
+        let output = Command::new("sh").args(&["-c", "codex --version"]).output()?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(stdout)
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "Command status non-zero"))
+        }
+    };
+
+    match run_cmd() {
+        Ok(stdout) => {
+            if !stdout.is_empty() {
+                // codex --version 通常输出类似 "0.1.0" 或 "codex 0.1.0"
+                if stdout.to_lowercase().contains("codex") {
+                    return Ok(stdout);
+                }
+                return Ok(format!("Codex {}", stdout));
+            }
+            Ok("Codex".to_string())
+        }
+        Err(_) => {
+            Ok("Codex".to_string())
+        }
+    }
+}
+
 // ==================== 会话名称自动修正 (移植自 rename 项目) ====================
 
 /// 将系统路径编码为 Claude Code 的项目目录名格式
@@ -1960,7 +2006,7 @@ fn get_session_history(
         .map_err(|e| format!("session not found: {}", e))?;
     let (agent_type, agent_session_id, project_path) = row;
 
-    // 2. Pi agent 暂未支持
+    // 2. Codex agent 暂未支持
     if agent_type != "claude" {
         log_to_file(&format!(
             "get_session_history: agent_type={} not yet supported",
@@ -3644,6 +3690,7 @@ pub fn run() {
             read_markdown_file,
             write_markdown_file,
             get_claude_version,
+            get_codex_version,
             check_if_paths_exist,
             archive_project,
             get_archived_projects,

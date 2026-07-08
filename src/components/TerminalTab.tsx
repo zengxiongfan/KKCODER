@@ -12,11 +12,10 @@ import {
 interface TerminalTabProps {
   sessionId: string;
   directory: string;
-  agentType: "claude" | "pi";
+  agentType: "claude" | "codex";
   agentSessionId: string;
   isReopen: boolean;
   onSpawned?: () => void;
-  onCaptureSessionId?: (sessionId: string, agentSessionId: string) => void;
   onStateChange?: (busy: boolean) => void;
   busy?: boolean;
   isActive?: boolean;
@@ -87,7 +86,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   agentSessionId,
   isReopen,
   onSpawned,
-  onCaptureSessionId,
   onStateChange,
   busy,
   isActive,
@@ -98,7 +96,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const capturedRef = useRef<boolean>(false);
 
   const onCommandCompleteRef = useRef(onCommandComplete);
   useEffect(() => {
@@ -506,24 +503,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                   if (text) {
                     log(`Pasting clipboard text (len=${text.length}).`);
                     registerPastedText(text);
-                    if (agentType === "pi") {
-                      const processedText = text.replace(/\r?\n/g, " ");
-                      term.paste(processedText);
-                    } else {
-                      term.paste(text);
-                    }
+                    term.paste(text);
                   }
                 }
               } catch (err) {
                 log(`Failed to read clipboard items, falling back to text: ${err}`);
                 if (text) {
                   registerPastedText(text);
-                  if (agentType === "pi") {
-                    const processedText = text.replace(/\r?\n/g, " ");
-                    term.paste(processedText);
-                  } else {
-                    term.paste(text);
-                  }
+                  term.paste(text);
                 }
               }
             }
@@ -664,31 +651,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                 }, delay);
               }
 
-              // 首次创建的 Pi 终端：自动捕获 /session 指令返回的实际 session ID 并回传保存
-              if (agentType === "pi" && !isReopen && !capturedRef.current) {
-                const rawOutput = event.payload.data;
-                // 1. 尝试匹配 "Session ID: xxx" 格式
-                const match = rawOutput.match(/(?:Session ID|session id|Session|session)\s*[:=]?\s*([a-zA-Z0-9\-]{8,64})/i);
-                if (match && match[1] && match[1].toLowerCase() !== "session") {
-                  const capturedId = match[1];
-                  capturedRef.current = true;
-                  log(`Captured Pi real session ID: ${capturedId}`);
-                  if (onCaptureSessionId) {
-                    onCaptureSessionId(sessionId, capturedId);
-                  }
-                } else {
-                  // 2. 尝试匹配标准 UUID 格式
-                  const uuidMatch = rawOutput.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
-                  if (uuidMatch) {
-                    const capturedId = uuidMatch[0];
-                    capturedRef.current = true;
-                    log(`Captured Pi UUID session ID: ${capturedId}`);
-                    if (onCaptureSessionId) {
-                      onCaptureSessionId(sessionId, capturedId);
-                    }
-                  }
-                }
-              }
+              // Codex 暂不在此处捕获 session ID（Codex 的 session 管理是内部的，由 `codex --resume` 处理）
+              // TODO: 后续可解析 Codex 输出中的 `session_id: xxx` 实现精确 resume
             }
           }
         );

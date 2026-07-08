@@ -177,7 +177,7 @@ body {
   transform: translateX(0);
 }
 
-.agent-selector-slider.pi {
+.agent-selector-slider.codex {
   transform: translateX(100%);
 }
 
@@ -211,7 +211,7 @@ body {
   color: #D97757 !important; /* Custom brand color for active Claude tab */
 }
 
-.agent-tab.active.pi-style {
+.agent-tab.active.codex-style {
   color: var(--color-green) !important;
 }
 
@@ -261,7 +261,7 @@ body {
   background-color: var(--bg-main);
 }
 
-.search-input.pi-focus:focus {
+.search-input.codex-focus:focus {
   border-color: var(--color-green);
   background-color: var(--bg-main);
 }
@@ -877,7 +877,7 @@ body {
   color: var(--text-primary) !important;
 }
 
-.folder-button.pi-hover:hover {
+.folder-button.codex-hover:hover {
   background-color: var(--bg-hover-item) !important;
   color: var(--text-primary) !important;
 }
@@ -904,7 +904,7 @@ body {
   color: var(--text-primary) !important;
 }
 
-.md-button.pi-hover:hover {
+.md-button.codex-hover:hover {
   background-color: var(--bg-hover-item) !important;
   color: var(--text-primary) !important;
 }
@@ -1800,8 +1800,8 @@ input:checked + .switch-slider:before {
   color: transparent !important;
 }
 
-/* 针对 Pi 终端进行优化隔离：强制锁定隐藏输入框的水平位置在左边缘，彻底防范输入法候选框因 TUI 隐藏硬件光标至右下角而漂移至最右侧甚至超出窗口 */
-.agent-type-pi .xterm-helper-textarea {
+/* 针对 Codex 终端进行优化隔离：强制锁定隐藏输入框的水平位置在左边缘，彻底防范输入法候选框因 TUI 隐藏硬件光标至右下角而漂移至最右侧甚至超出窗口 */
+.agent-type-codex .xterm-helper-textarea {
   left: 20px !important;
 }
 
@@ -2046,7 +2046,7 @@ input:checked + .switch-slider:before {
   border-top: 1px solid rgba(217, 119, 87, 0.35) !important;
 }
 
-.tab.glowing-pi {
+.tab.glowing-codex {
   animation: glowing-green 2s infinite ease-in-out;
   border-left: 1px solid rgba(16, 185, 129, 0.35) !important;
   border-right: 1px solid rgba(16, 185, 129, 0.35) !important;
@@ -2359,7 +2359,7 @@ input:checked + .switch-slider:before {
 
 /* 非活动标签思考完成后底部明黄色底线 */
 .tab.glowing-claude::before,
-.tab.glowing-pi::before {
+.tab.glowing-codex::before {
   content: '';
   position: absolute;
   bottom: 0;
@@ -2372,7 +2372,7 @@ input:checked + .switch-slider:before {
 
 /* 标签标题文字也变成亮黄色 */
 .tab.glowing-claude .tab-title-text,
-.tab.glowing-pi .tab-title-text {
+.tab.glowing-codex .tab-title-text {
   color: #fbbf24 !important;
   font-weight: 600;
 }
@@ -3017,8 +3017,8 @@ input:checked + .switch-slider:before {
   background-color: var(--color-orange);
 }
 
-.project-tree-resizer[data-agent-type="pi"]:hover,
-.project-tree-resizer[data-agent-type="pi"].dragging {
+.project-tree-resizer[data-agent-type="codex"]:hover,
+.project-tree-resizer[data-agent-type="codex"].dragging {
   background-color: var(--color-green);
 }
 

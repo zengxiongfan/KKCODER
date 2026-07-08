@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { Sidebar, Session, ClaudeIcon, PiIcon } from "./components/Sidebar";
+import { Sidebar, Session, ClaudeIcon, CodexIcon } from "./components/Sidebar";
 import { TerminalTab } from "./components/TerminalTab";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { SettingsModal } from "./components/SettingsModal";
@@ -63,6 +63,7 @@ function getFolderName(path: string): string {
 }
 
 const CLAUDE_VERSION_CACHE_KEY = "kkcoder_cached_claude_version";
+const CODEX_VERSION_CACHE_KEY = "kkcoder_cached_codex_version";
 
 function App() {
 
@@ -105,7 +106,7 @@ function App() {
   const isWindowFocusedRef = useRef<boolean>(true);
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<"claude" | "pi">("claude");
+  const [selectedAgent, setSelectedAgent] = useState<"claude" | "codex">("claude");
   const [showModal, setShowModal] = useState<boolean>(false);
   const [prefilledProjectPath, setPrefilledProjectPath] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState<boolean>(false);
@@ -145,6 +146,10 @@ function App() {
 
   const [claudeVersion, setClaudeVersion] = useState<string>(() => {
     return localStorage.getItem(CLAUDE_VERSION_CACHE_KEY) || "Claude Code";
+  });
+
+  const [codexVersion, setCodexVersion] = useState<string>(() => {
+    return localStorage.getItem(CODEX_VERSION_CACHE_KEY) || "Codex";
   });
 
   // 侧边栏拖拽调宽状态与拖拽处理
@@ -1242,8 +1247,22 @@ function App() {
         .catch(() => {});
     };
 
+    const fetchCodexVersion = () => {
+      invoke<string>("get_codex_version")
+        .then((ver) => {
+          setCodexVersion(ver);
+          localStorage.setItem(CODEX_VERSION_CACHE_KEY, ver);
+        })
+        .catch(() => {});
+    };
+
     const scheduleClaudeVersionFetch = () => {
       claudeVersionTimer = window.setTimeout(fetchClaudeVersion, 1500);
+    };
+
+    const scheduleCodexVersionFetch = () => {
+      // 错开 500ms，避免同时请求
+      window.setTimeout(fetchCodexVersion, 2000);
     };
 
     // 启动时清理空白会话（名为"新会话"且无对话内容）
@@ -1291,6 +1310,7 @@ function App() {
         }
         setIsInitLoaded(true);
         scheduleClaudeVersionFetch();
+        scheduleCodexVersionFetch();
         scheduleDeferredDiagnostics();
 
         // 启动时自动修正会话名称（延迟执行，不阻塞 UI 加载）
@@ -1305,6 +1325,7 @@ function App() {
         console.error("加载 SQLite 本地会话数据失败", err);
         setIsInitLoaded(true);
         scheduleClaudeVersionFetch();
+        scheduleCodexVersionFetch();
         scheduleDeferredDiagnostics();
       });
 
@@ -1521,7 +1542,7 @@ function App() {
 
     const s = sessions.find((sess) => sess.id === sid);
     if (s) {
-      setSelectedAgent(s.type);
+      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
     }
 
     const remaining = pendingRestoreIds.filter((id) => id !== sid);
@@ -1552,7 +1573,7 @@ function App() {
 
       const s = sessions.find((sess) => sess.id === nextActiveId);
       if (s) {
-        setSelectedAgent(s.type);
+        setSelectedAgent(s.type === "pi" ? "codex" : s.type);
       }
     }
 
@@ -1759,7 +1780,7 @@ function App() {
   const handleLocateSession = (sessionId: string) => {
     const s = sessions.find((sess) => sess.id === sessionId);
     if (s) {
-      setSelectedAgent(s.type);
+      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
       setHighlightSessionId(sessionId);
       log(`Locating session ${sessionId} in sidebar. Selected agent type: ${s.type}`);
     }
@@ -1907,24 +1928,6 @@ function App() {
     } catch (err) {
       log(`Failed to toggle favorite for session ${id}: ${err}`);
       alert(`操作收藏失败: ${err}`);
-    }
-  };
-
-  // 📥 首次启动 Pi 会话后自动捕获其 session ID 并同步回 SQLite 数据库与 React 状态
-  const handleCaptureSessionId = async (sessionId: string, agentSessionId: string) => {
-    log(`handleCaptureSessionId triggered: sessionId=${sessionId}, agentSessionId=${agentSessionId}`);
-    try {
-      const s = sessions.find((sess) => sess.id === sessionId);
-      if (s) {
-        const updatedSession = { ...s, agentSessionId };
-        await invoke("add_session", { session: updatedSession });
-        setSessions((prev) =>
-          prev.map((sess) => (sess.id === sessionId ? updatedSession : sess))
-        );
-        log(`Successfully captured and updated Pi session ID in database for ${sessionId} to ${agentSessionId}`);
-      }
-    } catch (err) {
-      log(`Failed to update captured session ID in database: ${err}`);
     }
   };
 
@@ -2260,8 +2263,8 @@ function App() {
                     key={s.id}
                     data-id={s.id}
                     className={`tab ${isActive ? "active" : ""} ${
-                      isActive && s.type === "pi" ? "pi-tab" : ""
-                    } ${isGlowing ? (s.type === "pi" ? "glowing-pi" : "glowing-claude") : ""} ${
+                      isActive && s.type === "codex" ? "codex-tab" : ""
+                    } ${isGlowing ? (s.type === "codex" ? "glowing-codex" : "glowing-claude") : ""} ${
                       draggingIndex === index ? "dragging" : ""
                     }`}
                     draggable={!isRenaming}
@@ -2314,7 +2317,7 @@ function App() {
                         {sessionBusy[s.id] ? (
                           <span className="tab-loading-spinner" title="思考中..." />
                         ) : (
-                          s.type === "claude" ? <ClaudeIcon size={14} color="#D97757" /> : <PiIcon size={14} color="var(--color-green)" />
+                          s.type === "claude" ? <ClaudeIcon size={14} color="#D97757" /> : <CodexIcon size={14} color="var(--color-green)" />
                         )}
                         <span className="tab-title-text">{s.name}</span>
                         {s.project && !s.isTemp && <span className="tab-project-tag">{s.project}</span>}
@@ -2381,14 +2384,13 @@ function App() {
                       <TerminalTab
                         sessionId={s.id}
                         directory={s.path}
-                        agentType={s.type}
+                        agentType={s.type === "pi" ? "codex" : s.type}
                         agentSessionId={s.agentSessionId}
                         isReopen={shouldResume}
                         onSpawned={() => {
                           log(`TerminalTab spawn resolved for session: ${s.id}. Removing from newSessionIds...`);
                           setNewSessionIds((prev) => prev.filter((nid) => nid !== s.id));
                         }}
-                        onCaptureSessionId={handleCaptureSessionId}
                         busy={sessionBusy[s.id] || false}
                         onStateChange={(busy) => {
                           setSessionBusy(prev => ({ ...prev, [s.id]: busy }));
@@ -2658,7 +2660,7 @@ function App() {
             {activeSession ? (
               <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                 <button
-                  className={`folder-button ${activeSession.type === "pi" ? "pi-hover" : ""}`}
+                  className={`folder-button ${activeSession.type === "codex" ? "codex-hover" : ""}`}
                   onClick={handleOpenFolder}
                   title={`项目物理路径: ${activeSession.path}\n点击在 Windows 资源管理器中打开`}
                 >
@@ -2669,12 +2671,12 @@ function App() {
                 </button>
 
                 <button
-                  className={`md-button ${activeSession.type === "pi" ? "pi-hover" : ""}`}
+                  className={`md-button ${activeSession.type === "codex" ? "codex-hover" : ""}`}
                   onClick={() => setShowMdEditor(true)}
-                  title={activeSession.type === "pi" ? "快速生成/编辑 AGENTS.md" : "快速生成/编辑 CLAUDE.md"}
+                  title={activeSession.type === "codex" ? "快速生成/编辑 AGENTS.md" : "快速生成/编辑 CLAUDE.md"}
                 >
                   <svg className="doc-svg-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: "2px", opacity: 0.85 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                  <span>{activeSession.type === "pi" ? "AGENTS.md" : "CLAUDE.md"}</span>
+                  <span>{activeSession.type === "codex" ? "AGENTS.md" : "CLAUDE.md"}</span>
                 </button>
               </div>
             ) : (
@@ -2738,7 +2740,7 @@ function App() {
                     color: activeSession.type === "claude" ? "var(--color-orange)" : "var(--color-green)",
                   }}
                 >
-                  {activeSession.type === "claude" ? claudeVersion : "Pi 终端"}
+                  {activeSession.type === "claude" ? claudeVersion : codexVersion}
                 </span>
               ) : (
                 <span>{claudeVersion} 准备就绪</span>
@@ -2944,7 +2946,7 @@ function App() {
           show={showMdEditor}
           onClose={() => setShowMdEditor(false)}
           projectPath={activeSession.path}
-          filename={activeSession.type === "pi" ? "AGENTS.md" : "CLAUDE.md"}
+          filename={activeSession.type === "codex" ? "AGENTS.md" : "CLAUDE.md"}
         />
       )}
 
@@ -3208,7 +3210,7 @@ function App() {
                       <div className="restore-item-info">
                         <div className="restore-item-name">{s.name}</div>
                         <div className="restore-item-path" title={s.path}>
-                          {s.type === "claude" ? "claude-code" : "pi"} · {s.path}
+                          {s.type === "claude" ? "claude-code" : "codex"} · {s.path}
                         </div>
                       </div>
                       <button

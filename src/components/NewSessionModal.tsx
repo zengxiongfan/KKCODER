@@ -5,7 +5,7 @@ import { DirectoryPickerModal } from "./DirectoryPickerModal";
 interface NewSessionModalProps {
   show: boolean;
   onClose: () => void;
-  selectedAgent: "claude" | "pi";
+  selectedAgent: "claude" | "codex";
   onCreate: (sessionName: string, projectPath: string, projectName: string) => void;
   initialProjectPath?: string;
 }
@@ -174,7 +174,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">
-            新建 {selectedAgent === "claude" ? "Claude Code" : "Pi"} 会话
+            新建 {selectedAgent === "claude" ? "Claude Code" : "Codex"} 会话
           </span>
           <button className="modal-close" onClick={onClose}>
             ×
