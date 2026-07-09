@@ -22,6 +22,8 @@ interface TerminalTabProps {
   onCommandComplete?: () => void;
   onUserSubmittedInput?: (sessionId: string, submittedAt: string) => void;
   onRenameSession?: (sessionId: string, newName: string) => void;
+  /** Codex session 绑定后通知父组件更新 sessions 状态 */
+  onSessionBound?: (sessionId: string, agentSessionId: string) => void;
 }
 
 const getTerminalThemeColors = (themeName: string) => {
@@ -92,6 +94,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   onCommandComplete,
   onUserSubmittedInput,
   onRenameSession,
+  onSessionBound,
 }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
@@ -107,6 +110,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const lastOutputTimeRef = useRef<number>(0);
   const debounceTimeoutRef = useRef<any>(null);
 
+
+  // 0. 用于 Codex session 反查的轮询状态
+  const codexSessionPollRef = useRef<boolean>(false);
+  const codexSessionStartTsRef = useRef<number>(0);
+  const codexPollTimerRef = useRef<any>(null);
 
   // 0. 用于自动命名的用户输入累积 buffer
   const userInputBufferRef = useRef<string>("");
@@ -184,6 +192,80 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       }
       localStorage.setItem("kkcoder_logs", JSON.stringify(existingLogs));
     } catch (e) {}
+  };
+
+  // ⭐ Codex session 反查：用户首次发消息后，轮询找到 codex 生成的 session 文件并持久化绑定
+  const pollCodexSession = (sid: string) => {
+    if (codexSessionPollRef.current) return;
+    codexSessionPollRef.current = true;
+    codexSessionStartTsRef.current = Date.now();
+    log(`[CodexSession] ${sid} 开始轮询 codex session 文件...`);
+
+    const POLL_INTERVAL = 1500;
+    const POLL_TIMEOUT = 60000;
+    const INITIAL_DELAY = 2000;
+    let isFirstTick = true;
+
+    codexPollTimerRef.current = setInterval(async () => {
+      const elapsed = Date.now() - codexSessionStartTsRef.current;
+
+      // 60s 超时放弃
+      if (elapsed > POLL_TIMEOUT) {
+        clearInterval(codexPollTimerRef.current);
+        codexPollTimerRef.current = null;
+        codexSessionPollRef.current = false;
+        log(`[CodexSession] ${sid} 轮询超时（60s），放弃`);
+        return;
+      }
+
+      // 首次 tick 等待初始延迟
+      if (isFirstTick) {
+        isFirstTick = false;
+        if (elapsed < INITIAL_DELAY) {
+          return;
+        }
+      }
+
+      try {
+        // ⭐ 调试：记录每个 tick 的实际查询
+        log(`[CodexSession] ${sid} 第 ${Math.round(elapsed/1000)}s 调用 find_latest_codex_session...`);
+
+        const result = await invoke<{ agentSessionId: string; jsonlPath: string } | null>(
+          "find_latest_codex_session",
+          { sessionId: sid }  // 对应 Rust: FindCodexSessionRequest { session_id } + #[serde(rename_all = "camelCase")]
+        );
+
+        // ⭐ 调试：记录返回值
+        log(`[CodexSession] ${sid} find_latest 返回: ${JSON.stringify(result)}`);
+
+        if (result?.agentSessionId) {
+          clearInterval(codexPollTimerRef.current);
+          codexPollTimerRef.current = null;
+          codexSessionPollRef.current = false;
+          log(`[CodexSession] ${sid} 查得 codex session_id=${result.agentSessionId}, path=${result.jsonlPath}`);
+
+          // 持久化绑定到 SQLite
+          try {
+            await invoke("bind_codex_session", {
+              sessionId: sid,
+              agentSessionId: result.agentSessionId,
+            });
+            log(`[CodexSession] ${sid} 已持久化绑定 agentSessionId=${result.agentSessionId}`);
+          } catch (bindErr) {
+            log(`[CodexSession] ${sid} bind 调用失败: ${bindErr}`);
+            return;
+          }
+
+          // 通知父组件更新 sessions 状态
+          onSessionBound?.(sid, result.agentSessionId);
+        } else {
+          // ⭐ 调试：本轮未返回有效结果
+          log(`[CodexSession] ${sid} 第 ${Math.round(elapsed/1000)}s 未命中（result=${JSON.stringify(result)}），继续轮询...`);
+        }
+      } catch (err) {
+        log(`[CodexSession] ${sid} invoke 异常: ${err}`);
+      }
+    }, POLL_INTERVAL);
   };
 
   // 监听来自父组件的 busy 繁忙状态信号，自动同步 isAnsweringRef 并开始 PTY 静默监测
@@ -712,6 +794,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         userInputBufferRef.current = "";
         atomicInputTagsRef.current = [];
 
+        // ⭐ Codex 首次提交后，启动轮询反查 session 文件并持久化绑定
+        if (agentType === "codex" && !agentSessionId && !codexSessionPollRef.current) {
+          pollCodexSession(sessionId);
+        }
+
         isAnsweringRef.current = true;
         commandStartTimeRef.current = Date.now();
         lastOutputTimeRef.current = Date.now();
@@ -948,6 +1035,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       window.removeEventListener("kkcoder-font-change", handleFontChange);
       window.removeEventListener("kkcoder-font-size-change", handleFontSizeChange);
       window.removeEventListener("kkcoder-insert-conversation-tag", handleInsertConversationTag);
+      // 清理 codex session 反查轮询
+      if (codexPollTimerRef.current) {
+        clearInterval(codexPollTimerRef.current);
+        codexPollTimerRef.current = null;
+        codexSessionPollRef.current = false;
+      }
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
       if (unlistenFn) {

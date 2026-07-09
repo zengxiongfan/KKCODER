@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tauri::{State, AppHandle, Emitter};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
 use std::io::Write;
+use chrono::Datelike;
 
 mod remote;
 mod commands;
@@ -29,6 +30,8 @@ pub struct ActiveSession {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
     spawn_token: u64,
+    /// Claude Code 的 session UUID / Codex 的 session UUID（用于 reopen 精确恢复）
+    pub agent_session_id: String,
 }
 
 pub struct PtyManager {
@@ -1055,13 +1058,18 @@ fn spawn_terminal(
             format!("claude --dangerously-skip-permissions --session-id \"{}\"\r\n", agent_session_id)
         }
     } else if agent_type == "codex" {
-        if is_reopen {
-            // Codex 的 resume 只支持恢复最近一次会话（全局），
-            // 无法像 Claude 那样用 --session-id 精确恢复到某次会话。
-            // TODO: 后续可解析 Codex 输出中的 session_id: xxx，存到 agent_session_id，实现精确 resume。
-            "codex --resume\r\n".to_string()
+        if is_reopen && !agent_session_id.is_empty() {
+            // 精确恢复指定 session（Codex resume 支持传 session UUID）
+            format!(
+                "codex --dangerously-bypass-approvals-and-sandbox resume {}\r\n",
+                agent_session_id
+            )
+        } else if is_reopen {
+            // 兜底：无 session ID 时恢复最近一次
+            "codex --dangerously-bypass-approvals-and-sandbox resume\r\n".to_string()
         } else {
-            "codex\r\n".to_string()
+            // 新建会话也加 bypass 标志，保持行为一致
+            "codex --dangerously-bypass-approvals-and-sandbox\r\n".to_string()
         }
     } else {
         "\r\n".to_string()
@@ -1127,35 +1135,6 @@ fn spawn_terminal(
                     w.flush().ok();
                 }
                 log_to_file("Background thread: Enter key sent successfully!");
-            } else {
-                log_to_file("Background thread error: active session not found inside sessions map!");
-            }
-        });
-    }
-
-    // 如果是重新唤起已有的 Codex 会话，则延时 2.5 秒等 Codex 客户端完全拉起后，自动键入 `codex --resume` 还原最近一次会话
-    if is_reopen && agent_type == "codex" {
-        log_to_file("is_reopen is true for Codex: spawning background thread for `codex --resume` writing...");
-        let sessions_clone = state.sessions.clone();
-        let session_id_clone = session_id.clone();
-        std::thread::spawn(move || {
-            log_to_file(&format!("Background Codex-resume thread spawned. spawn_token={}. Sleeping 2500ms...", spawn_token));
-            std::thread::sleep(std::time::Duration::from_millis(2500));
-            log_to_file("Background Codex-resume thread sleep finished. Locking sessions map...");
-            let mut sessions = sessions_clone.lock().unwrap();
-            if let Some(session) = sessions.get_mut(&session_id_clone) {
-                if session.spawn_token != spawn_token {
-                    log_to_file(&format!("Stale spawn token detected (active={}, thread={}). Safely skipping codex resume typing.", session.spawn_token, spawn_token));
-                    return;
-                }
-
-                log_to_file("Background thread: writing `codex --resume` cmd...");
-                {
-                    let mut w = session.writer.lock().unwrap();
-                    w.write_all(b"codex --resume\r\n").ok();
-                    w.flush().ok();
-                }
-                log_to_file("Background thread: `codex --resume` cmd written!");
             } else {
                 log_to_file("Background thread error: active session not found inside sessions map!");
             }
@@ -1287,6 +1266,7 @@ fn spawn_terminal(
             master: master_shared.clone(),
             writer: writer.clone(),
             spawn_token,
+            agent_session_id: agent_session_id.clone(),
         },
     );
 
@@ -2717,6 +2697,193 @@ async fn llm_rename_sessions(
     }).await.map_err(|e| format!("Task join error: {}", e))?
 }
 
+// ==================== Codex 会话反查与绑定 Tauri Commands ====================
+
+/// Codex session 反查响应体
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSessionLookupResult {
+    pub agent_session_id: String,
+    pub jsonl_path: String,
+}
+
+/// 请求体（camelCase 兼容前端 invoke）
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindCodexSessionRequest {
+    pub session_id: String,
+}
+
+/// 绑定请求体（camelCase 兼容前端 invoke）
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BindCodexSessionRequest {
+    pub session_id: String,
+    pub agent_session_id: String,
+}
+
+/// 从 codex rollout 文件名中提取 UUID（倒数 5 段破折号分隔部分）
+/// 文件名示例: rollout-2026-07-08T17-50-34-019f4122-e95c-7b73-89b4-5f8e9138afc2
+fn extract_uuid_from_rollout_filename(filename: &str) -> Option<String> {
+    if !filename.starts_with("rollout-") {
+        return None;
+    }
+    let parts: Vec<&str> = filename.split('-').collect();
+    if parts.len() < 7 {
+        return None;
+    }
+    // UUID v7 格式: 8-4-4-4-12，共 36 字符含 4 个破折号
+    let candidate = parts[parts.len() - 5..].join("-");
+    if candidate.len() == 36 && candidate.matches('-').count() == 4 {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// 扫描目录中最新修改的 rollout-*.jsonl 文件
+/// 若传入 since，则只考虑 modified > since 的文件（避免误匹配旧 session）
+fn find_latest_rollout_file(dir: &std::path::Path, since: Option<std::time::SystemTime>) -> Option<std::path::PathBuf> {
+    let entries: Vec<_> = std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).collect();
+    let mut latest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if !name.starts_with("rollout-") {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        // since 过滤：只取 since 之后修改的文件
+        if let Some(s) = since {
+            if modified <= s {
+                continue;
+            }
+        }
+        if latest.as_ref().map_or(true, |(t, _)| modified > *t) {
+            latest = Some((modified, path));
+        }
+    }
+    latest.map(|(_, p)| p)
+}
+
+/// 反查当前 codex session：扫 ~/.codex/sessions/{YYYY}/{MM}/{DD}/ 取最新的 rollout 文件，提取 UUID 返回
+/// 防重复依据：SQLite 中该 session_id 的 agent_session_id 是否已非空
+#[tauri::command]
+fn find_latest_codex_session(
+    session_id: String,
+) -> Result<Option<CodexSessionLookupResult>, String> {
+    log_to_file(&format!("[CodexSessionLookup] === ENTRY === session_id={}", session_id));
+    // 1. 查 SQLite 中是否已绑定 agent_session_id（防重复反查，无论 PTY 是否在内存中）
+    let db_path = get_db_path();
+    let already_bound: bool = {
+        let conn = match rusqlite::Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(_) => return Ok(None),
+        };
+        conn.query_row(
+            "SELECT agent_session_id FROM sessions WHERE id = ?1",
+            [&session_id],
+            |row| {
+                let id: String = row.get(0)?;
+                Ok(!id.is_empty())
+            },
+        )
+        .unwrap_or(false)
+    };
+    if already_bound {
+        log_to_file(&format!("[CodexSessionLookup] session={} 已绑定，跳过", session_id));
+        return Ok(None);
+    }
+    log_to_file(&format!("[CodexSessionLookup] session={} 未绑定，开始反查文件", session_id));
+
+    // 2. 定位 ~/.codex/sessions/{YYYY}/{MM}/{DD}/
+    let home = dirs::home_dir().ok_or("无法获取用户主目录")?;
+    let sessions_root = home.join(".codex").join("sessions");
+    if !sessions_root.is_dir() {
+        log_to_file("[CodexSessionLookup] ~/.codex/sessions/ 目录不存在");
+        return Ok(None);
+    }
+
+    let now = chrono::Local::now();
+    let today_dir = sessions_root.join(format!(
+        "{}/{:02}/{:02}",
+        now.year(),
+        now.month(),
+        now.day()
+    ));
+
+    // 水印：只关心最近 5 分钟内产生的新 session 文件（避免误匹配旧 session）
+    let since = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(300));
+
+    // 3. 优先扫今天的目录，若不存在则回退扫全部子目录取最新
+    let latest_path = if today_dir.is_dir() {
+        find_latest_rollout_file(&today_dir, since)
+    } else {
+        log_to_file(&format!("[CodexSessionLookup] 今天目录 {} 不存在，回退全量扫描", today_dir.display()));
+        let mut global_latest: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+        for entry in std::fs::read_dir(&sessions_root).ok().into_iter().flatten().filter_map(|e| e.ok()) {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+            if let Some(p) = find_latest_rollout_file(&entry.path(), since) {
+                if let Ok(m) = p.metadata().and_then(|m| m.modified()) {
+                    if global_latest.as_ref().map_or(true, |(t, _)| m > *t) {
+                        global_latest = Some((m, p));
+                    }
+                }
+            }
+        }
+        global_latest.map(|(_, p)| p)
+    };
+
+    // 4. 提取 UUID 并返回
+    if let Some(path) = latest_path {
+        let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        if let Some(uuid) = extract_uuid_from_rollout_filename(filename) {
+            log_to_file(&format!(
+                "[CodexSessionLookup] session={} → uuid={}, path={}",
+                session_id, uuid, path.display()
+            ));
+            return Ok(Some(CodexSessionLookupResult {
+                agent_session_id: uuid,
+                jsonl_path: path.to_string_lossy().to_string(),
+            }));
+        } else {
+            log_to_file(&format!("[CodexSessionLookup] 文件名解析 UUID 失败: {}", filename));
+        }
+    } else {
+        log_to_file(&format!("[CodexSessionLookup] session={} 未找到任何 rollout 文件", session_id));
+    }
+
+    Ok(None)
+}
+
+/// 绑定 codex session_id 到已有会话记录（前端反查命中后调用一次）
+#[tauri::command]
+fn bind_codex_session(
+    session_id: String,
+    agent_session_id: String,
+) -> Result<(), String> {
+    log_to_file(&format!("[CodexSessionBind] === ENTRY === session={}, agent_session_id={}", session_id, agent_session_id));
+    if agent_session_id.is_empty() {
+        return Err("agent_session_id 不能为空".to_string());
+    }
+    let db_path = get_db_path();
+    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE sessions SET agent_session_id = ?1 WHERE id = ?2",
+        rusqlite::params![agent_session_id, session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    log_to_file(&format!(
+        "[CodexSessionBind] session={} → agent_session_id={}",
+        session_id, agent_session_id
+    ));
+    Ok(())
+}
+
 // ==================== 归档项目 Tauri Commands ====================
 
 // 归档项目
@@ -3699,6 +3866,8 @@ pub fn run() {
             llm_rename_sessions,
             search_session_contents,
             get_session_history,
+            find_latest_codex_session,
+            bind_codex_session,
             read_project_files,
             read_project_directory,
             search_project_files,

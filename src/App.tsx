@@ -1435,8 +1435,9 @@ function App() {
     log(`handleCreateSession triggered: name=${sessionName}, path=${projectPath}, project=${projectName}, agent=${selectedAgent}`);
 
     const newId = `session-${Date.now().toString()}`;
-    const agentSessionId = generateUUID(); // 生成安全标准的 RFC 4122 持久化会话 UUID
-    log(`Generated new session UUIDs: id=${newId}, agentSessionId=${agentSessionId}`);
+    // Claude: 预生成 UUID 通过 --session-id 精确恢复；Codex: 留空，发消息后反查绑定
+    const agentSessionId = selectedAgent === "claude" ? generateUUID() : "";
+    log(`Generated new session UUIDs: id=${newId}, agentSessionId=${agentSessionId}, agent=${selectedAgent}`);
     
     const newSession: Session = {
       id: newId,
@@ -1499,7 +1500,8 @@ function App() {
     const sessionName = `临时终端${nextNumber}`;
 
     const newId = `temp-session-${Date.now().toString()}`;
-    const agentSessionId = generateUUID();
+    // Claude: 预生成 UUID；Codex: 留空，发消息后反查绑定
+    const agentSessionId = selectedAgent === "claude" ? generateUUID() : "";
     
     const newSession: Session = {
       id: newId,
@@ -1913,6 +1915,16 @@ function App() {
       log(`Failed to rename session ${id}: ${err}`);
       alert(`重命名失败: ${err}`);
     }
+  };
+
+  // ⭐ Codex session 绑定：更新本地 SQLite 已完成后，同步 React 状态
+  const handleSessionBound = (id: string, agentSessionId: string) => {
+    log(`handleSessionBound: id=${id}, agentSessionId=${agentSessionId}`);
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, agentSessionId } : s))
+    );
+    // 关键：从 newSessionIds 中移除，确保下次 reopen 能被 shouldResumeSession 判定为恢复
+    setNewSessionIds((prev) => prev.filter((nid) => nid !== id));
   };
 
   // ⭐ 切换会话收藏状态，同步写入 SQLite 并更新 React 状态
@@ -2399,6 +2411,7 @@ function App() {
                         onCommandComplete={() => handleCommandComplete(s.id)}
                         onUserSubmittedInput={handleUserSubmittedInputWithRenameReset}
                         onRenameSession={handleRenameSession}
+                        onSessionBound={handleSessionBound}
                       />
                       {sessionBusy[s.id] && (
                         <div className="terminal-thinking-badge">
