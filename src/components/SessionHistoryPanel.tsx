@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 // ==================== 类型定义 ====================
 interface HistoryMessage {
   id: string;
-  role: "user" | "assistant" | "tool_use" | "tool_result" | "system";
+  role: "user" | "assistant" | "tool_use" | "tool_result" | "system" | "reasoning";
   timestamp?: string | null;
   content: string;
   toolName?: string | null;
@@ -70,24 +70,35 @@ function highlight(text: string, query: string): React.ReactNode {
 // 会导致 YOU 和 CLAUDE 徽章颜色一致无法区分。固定用蓝 + Claude 品牌橙。
 const ROLE_META: Record<string, { label: string; color: string }> = {
   user: { label: "YOU", color: "#3b82f6" },
-  assistant: { label: "CLAUDE", color: "#D97757" },
+  assistant: { label: "ASSISTANT", color: "#D97757" },
   tool_use: { label: "TOOL", color: "#8b5cf6" },
   tool_result: { label: "RESULT", color: "#10b981" },
   system: { label: "SYSTEM", color: "#94a3b8" },
+  reasoning: { label: "REASONING", color: "#f59e0b" },
 };
+
+/** 根据 agentType 获取 assistant 角色的展示标签 */
+function getAssistantLabel(agentType: string): string {
+  return agentType === "codex" ? "CODEX" : "CLAUDE";
+}
 
 // ==================== 消息卡片组件 ====================
 const MessageCard: React.FC<{
   msg: HistoryMessage;
   query: string;
+  agentType: string;
   onJump: (anchor: string) => void;
   isActiveHit?: boolean;
   registerRef?: (id: string, el: HTMLDivElement | null) => void;
-}> = ({ msg, query, onJump, isActiveHit, registerRef }) => {
+}> = ({ msg, query, agentType, onJump, isActiveHit, registerRef }) => {
   const meta = ROLE_META[msg.role] || ROLE_META.system;
   const [expanded, setExpanded] = useState<boolean>(false);
   const isToolUse = msg.role === "tool_use";
   const isToolResult = msg.role === "tool_result";
+  const isReasoning = msg.role === "reasoning";
+
+  // assistant 标签根据 agentType 动态显示
+  const label = msg.role === "assistant" ? getAssistantLabel(agentType) : meta.label;
 
   // 对长 content 折叠
   const longContent = (msg.content || "").length > 480;
@@ -105,7 +116,7 @@ const MessageCard: React.FC<{
           className="history-msg-role"
           style={{ color: meta.color, borderColor: meta.color }}
         >
-          {meta.label}
+          {label}
         </span>
         {msg.toolName && (
           <span className="history-msg-toolname" title={msg.toolName}>
@@ -118,14 +129,16 @@ const MessageCard: React.FC<{
         {msg.timestamp && (
           <span className="history-msg-time">{formatTime(msg.timestamp)}</span>
         )}
-        <button
-          className="history-jump-btn"
-          disabled={!msg.anchor}
-          onClick={() => msg.anchor && onJump(msg.anchor)}
-          title={msg.anchor ? "关闭面板并定位到该消息在终端中的位置" : "工具调用消息无法定位到终端"}
-        >
-          → 跳到终端
-        </button>
+        {!isReasoning && (
+          <button
+            className="history-jump-btn"
+            disabled={!msg.anchor}
+            onClick={() => msg.anchor && onJump(msg.anchor)}
+            title={msg.anchor ? "关闭面板并定位到该消息在终端中的位置" : "工具调用消息无法定位到终端"}
+          >
+            → 跳到终端
+          </button>
+        )}
       </div>
 
       {isToolUse && msg.toolInput ? (
@@ -156,6 +169,13 @@ const MessageCard: React.FC<{
               {expanded ? "收起" : "展开全部"}
             </button>
           )}
+        </div>
+      ) : isReasoning ? (
+        <div className="history-msg-body history-reasoning">
+          <div className="history-reasoning-toggle" onClick={() => setExpanded((v) => !v)}>
+            {expanded ? "▼ 收起推理过程" : "▶ 展开推理过程"}
+          </div>
+          {expanded && highlight(displayContent, query)}
         </div>
       ) : (
         <div className="history-msg-body">
@@ -260,8 +280,8 @@ export const SessionHistoryPanel: React.FC<Props> = ({
     if (!result?.messages) return [];
     const q = debouncedQuery.trim().toLowerCase();
     return result.messages.filter((m) => {
-      // 工具调用过滤：默认隐藏 tool_use / tool_result
-      if (!showToolCalls && (m.role === "tool_use" || m.role === "tool_result")) {
+      // 工具调用过滤：默认隐藏 tool_use / tool_result / reasoning（模型思考过程）
+      if (!showToolCalls && (m.role === "tool_use" || m.role === "tool_result" || m.role === "reasoning")) {
         return false;
       }
       if (!q) return true;
@@ -456,7 +476,7 @@ export const SessionHistoryPanel: React.FC<Props> = ({
                 <>
                   <div>该 Agent 类型 ({result.agentType}) 的历史查看功能即将支持</div>
                   <div style={{ fontSize: "12px", opacity: 0.7, marginTop: 8 }}>
-                    当前仅支持 Claude Code agent
+                    当前支持 Claude Code 和 Codex agent
                   </div>
                 </>
               )}
@@ -484,6 +504,7 @@ export const SessionHistoryPanel: React.FC<Props> = ({
                   key={`${m.id || idx}`}
                   msg={m}
                   query={debouncedQuery}
+                  agentType={result.agentType}
                   onJump={onJumpToTerminal}
                   isActiveHit={debouncedQuery.trim().length > 0 && idx + 1 === currentHitIndex}
                   registerRef={(id, el) => { messageRefs.current[id] = el; }}

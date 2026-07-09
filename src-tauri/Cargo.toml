@@ -44,5 +44,6 @@ git2 = "0.19"
 notify = "6"
 notify-debouncer-mini = "0.4"
 log = "0.4"
+walkdir = "2"
 
 

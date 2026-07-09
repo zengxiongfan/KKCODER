@@ -1529,6 +1529,11 @@ function App() {
       setOpenTabIds((prev) => [...prev, id]);
     }
     setActiveSessionId(id);
+    // 联动切换左侧 agent 选中态，确保当前会话所属 agent 在侧边栏可见
+    const s = sessions.find((sess) => sess.id === id);
+    if (s) {
+      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+    }
     // 点击任意会话标签时自动关闭恢复提示
     setShowRestoreToast(false);
     setShowRestoreModal(false);
@@ -2287,6 +2292,8 @@ function App() {
                     onClick={() => {
                       setActiveSessionId(s.id);
                       setGlowingSessionIds((prev) => prev.filter((id) => id !== s.id));
+                      // 联动切换左侧 agent 选中态
+                      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
                     }}
                     onMouseDown={(e) => {
                       if (e.button === 1) {

@@ -1986,22 +1986,7 @@ fn get_session_history(
         .map_err(|e| format!("session not found: {}", e))?;
     let (agent_type, agent_session_id, project_path) = row;
 
-    // 2. Codex agent 暂未支持
-    if agent_type != "claude" {
-        log_to_file(&format!(
-            "get_session_history: agent_type={} not yet supported",
-            agent_type
-        ));
-        return Ok(SessionHistoryResult {
-            available: false,
-            reason: Some("agent_not_supported".to_string()),
-            session_id,
-            agent_type,
-            total: 0,
-            messages: vec![],
-        });
-    }
-
+    // 2. 根据 agent_type 选择不同的查找与解析策略
     if agent_session_id.is_empty() {
         log_to_file("get_session_history: empty agent_session_id");
         return Ok(SessionHistoryResult {
@@ -2014,27 +1999,61 @@ fn get_session_history(
         });
     }
 
-    // 3. 查找 JSONL 文件
-    let jsonl_path = match find_claude_jsonl(&agent_session_id, &project_path) {
-        Some(p) => p,
-        None => {
-            log_to_file(&format!(
-                "get_session_history: jsonl not found for session={} path={}",
-                session_id, project_path
-            ));
-            return Ok(SessionHistoryResult {
-                available: false,
-                reason: Some("not_found".to_string()),
-                session_id,
-                agent_type,
-                total: 0,
-                messages: vec![],
-            });
-        }
+    // 3. 查找 JSONL 文件并解析
+    let mut all = if agent_type == "claude" {
+        // 3a. Claude Code: 按编码路径查找 + read_claude_history_full
+        let jsonl_path = match find_claude_jsonl(&agent_session_id, &project_path) {
+            Some(p) => p,
+            None => {
+                log_to_file(&format!(
+                    "get_session_history: jsonl not found for session={} path={}",
+                    session_id, project_path
+                ));
+                return Ok(SessionHistoryResult {
+                    available: false,
+                    reason: Some("not_found".to_string()),
+                    session_id,
+                    agent_type,
+                    total: 0,
+                    messages: vec![],
+                });
+            }
+        };
+        read_claude_history_full(&jsonl_path)
+    } else if agent_type == "codex" {
+        // 3b. Codex: 按 UUID 扫目录查找 + read_codex_history_full
+        let jsonl_path = match find_codex_rollout_file(&agent_session_id) {
+            Some(p) => p,
+            None => {
+                log_to_file(&format!(
+                    "get_session_history: codex rollout not found for session={} uuid={}",
+                    session_id, agent_session_id
+                ));
+                return Ok(SessionHistoryResult {
+                    available: false,
+                    reason: Some("not_found".to_string()),
+                    session_id,
+                    agent_type,
+                    total: 0,
+                    messages: vec![],
+                });
+            }
+        };
+        read_codex_history_full(&jsonl_path)
+    } else {
+        log_to_file(&format!(
+            "get_session_history: agent_type={} not yet supported",
+            agent_type
+        ));
+        return Ok(SessionHistoryResult {
+            available: false,
+            reason: Some("agent_not_supported".to_string()),
+            session_id,
+            agent_type,
+            total: 0,
+            messages: vec![],
+        });
     };
-
-    // 4. 解析为结构化消息
-    let mut all = read_claude_history_full(&jsonl_path);
     let total = all.len();
     if total == 0 {
         return Ok(SessionHistoryResult {
@@ -2108,6 +2127,236 @@ fn extract_anchor(content: &str) -> String {
         .collect();
     let trimmed: String = stripped.trim().chars().take(40).collect();
     trimmed
+}
+
+/// 按 UUID 查找 Codex rollout JSONL 文件
+/// 扫描 ~/.codex/sessions/**/ 匹配文件名末尾为 {UUID}.jsonl 的文件
+fn find_codex_rollout_file(uuid: &str) -> Option<std::path::PathBuf> {
+    let home = dirs::home_dir()?;
+    let sessions_root = home.join(".codex").join("sessions");
+    if !sessions_root.is_dir() {
+        return None;
+    }
+    // 递归扫描所有子目录
+    let entries: Vec<_> = walkdir::WalkDir::new(&sessions_root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .collect();
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        // 文件名格式: rollout-{timestamp}-{UUID}，检查是否以 UUID 结尾
+        if stem.ends_with(uuid) {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
+}
+
+/// 从 Codex rollout JSONL content 数组中提取纯文本
+fn extract_codex_text_content(content: &serde_json::Value) -> String {
+    let arr = match content.as_array() {
+        Some(a) => a,
+        None => return String::new(),
+    };
+    let parts: Vec<String> = arr
+        .iter()
+        .filter_map(|block| {
+            let t = block.get("type")?.as_str()?;
+            if t == "input_text" || t == "output_text" || t == "reasoning_text" {
+                Some(block.get("text")?.as_str()?.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    parts.join("\n").trim().to_string()
+}
+
+/// 完整解析 Codex rollout JSONL 文件为结构化历史消息列表
+/// 支持新版格式（0.140+）：response_item + function_call/function_call_output/reasoning
+pub(crate) fn read_codex_history_full(jsonl_path: &std::path::Path) -> Vec<HistoryMessage> {
+    let file = match std::fs::File::open(jsonl_path) {
+        Ok(f) => f,
+        Err(_) => return vec![],
+    };
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+    let mut out: Vec<HistoryMessage> = Vec::new();
+    let mut pending_tool_calls: std::collections::HashMap<String, (String, serde_json::Value)> = std::collections::HashMap::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if line.is_empty() {
+            continue;
+        }
+        let obj: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let typ = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if typ.is_empty() {
+            continue;
+        }
+        let timestamp = obj
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if typ == "response_item" {
+            let payload = match obj.get("payload") {
+                Some(p) => p,
+                None => continue,
+            };
+            let payload_type = payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            if payload_type == "message" {
+                let role = payload.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                // 跳过 developer 角色（系统权限指令等）
+                if role == "developer" {
+                    continue;
+                }
+                let content = payload.get("content");
+                let text = content.map(|c| extract_codex_text_content(c)).unwrap_or_default();
+                if text.trim().is_empty() {
+                    continue;
+                }
+                // 跳过系统注入的 user 角色消息（AGENTS.md 指令等）
+                // 特征：role=user 且内容包含 <INSTRUCTIONS> 标记
+                if role == "user" && text.contains("<INSTRUCTIONS>") {
+                    continue;
+                }
+                let msg_id = payload
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let role_str = match role {
+                    "user" => "user",
+                    "assistant" => "assistant",
+                    _ => "system",
+                };
+                out.push(HistoryMessage {
+                    id: if msg_id.is_empty() {
+                        format!("codex-{}", out.len())
+                    } else {
+                        msg_id
+                    },
+                    role: role_str.to_string(),
+                    timestamp: timestamp.clone(),
+                    content: text.clone(),
+                    tool_name: None,
+                    tool_input: None,
+                    tool_result: None,
+                    model: None,
+                    anchor: extract_anchor(&text),
+                });
+            } else if payload_type == "reasoning" {
+                let text = extract_codex_text_content(payload.get("content").unwrap_or(&serde_json::Value::Null));
+                if !text.trim().is_empty() {
+                    let rs_id = payload
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    out.push(HistoryMessage {
+                        id: if rs_id.is_empty() {
+                            format!("codex-rs-{}", out.len())
+                        } else {
+                            rs_id
+                        },
+                        role: "reasoning".to_string(),
+                        timestamp: timestamp.clone(),
+                        content: text,
+                        tool_name: None,
+                        tool_input: None,
+                        tool_result: None,
+                        model: None,
+                        anchor: String::new(),
+                    });
+                }
+            } else if payload_type == "function_call" {
+                let name = payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                // Codex: arguments 可能是字符串化的 JSON，尝试 parse 为对象
+                let arguments = payload.get("input").cloned()
+                    .or_else(|| payload.get("arguments").cloned())
+                    .unwrap_or(serde_json::Value::Null);
+                let arguments = if let Some(s) = arguments.as_str() {
+                    serde_json::from_str(s).unwrap_or_else(|_| serde_json::Value::String(s.to_string()))
+                } else {
+                    arguments
+                };
+                let call_id = payload
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let fc_id = payload
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !call_id.is_empty() {
+                    pending_tool_calls.insert(call_id.clone(), (name.clone(), arguments.clone()));
+                }
+                out.push(HistoryMessage {
+                    id: if fc_id.is_empty() {
+                        format!("codex-fc-{}", out.len())
+                    } else {
+                        fc_id
+                    },
+                    role: "tool_use".to_string(),
+                    timestamp: timestamp.clone(),
+                    content: format!("⏵ {}", name),
+                    tool_name: Some(name),
+                    tool_input: Some(arguments),
+                    tool_result: None,
+                    model: None,
+                    anchor: String::new(),
+                });
+            } else if payload_type == "function_call_output" {
+                let call_id = payload
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let output = payload
+                    .get("output")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                // 尝试从 pending_tool_calls 获取工具名
+                let tool_name = pending_tool_calls
+                    .get(&call_id)
+                    .map(|(n, _)| n.clone());
+                out.push(HistoryMessage {
+                    id: format!("codex-fco-{}", out.len()),
+                    role: "tool_result".to_string(),
+                    timestamp: timestamp.clone(),
+                    content: output,
+                    tool_name,
+                    tool_input: None,
+                    tool_result: Some(call_id),
+                    model: None,
+                    anchor: String::new(),
+                });
+            }
+        }
+        // 其它 type（session_meta, event_msg, world_state, turn_context 等）忽略
+    }
+
+    out
 }
 
 // --- 启发式标题生成 (移植自 rename 的 heuristic namer) ---
