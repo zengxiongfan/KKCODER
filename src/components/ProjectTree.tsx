@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  Folder,
-  FolderOpen,
   Search,
   RefreshCw,
   ChevronRight,
@@ -310,11 +308,12 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
             )}
           </span>
           <span className="tree-node-icon">
-            {node.isDir ? (
-              shouldShowChildren ? <FolderOpen size={14} className="folder-icon open" /> : <Folder size={14} className="folder-icon" />
-            ) : (
-              <FileIcon name={node.name} size={14} />
-            )}
+            <FileIcon
+              name={node.name}
+              size={14}
+              isDir={node.isDir}
+              isOpen={shouldShowChildren}
+            />
           </span>
           <span className="tree-node-name" title={node.name}>
             {node.name}
