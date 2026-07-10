@@ -837,50 +837,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <input
             type="text"
             className={`search-input ${selectedAgent === "codex" ? "codex-focus" : ""}`}
-            style={{ paddingRight: selectedAgent === "claude" ? "34px" : "12px" }}
+            style={{ paddingRight: "34px" }}
             placeholder={isContentSearch ? "✨ 全局搜索聊天记录内容..." : "搜索本地会话项目..."}
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
           />
-          {selectedAgent === "claude" && (
-            <button
-              className={`search-enhance-btn ${isContentSearch ? "active" : ""}`}
-              onClick={() => setIsContentSearch(!isContentSearch)}
-              title={isContentSearch ? "切换为普通标题搜索" : "全局聊天内容搜索 (✨)"}
-              style={{
-                position: "absolute",
-                right: "8px",
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: isContentSearch ? "var(--color-primary)" : "var(--text-secondary)",
-                transition: "var(--transition-smooth)",
-                padding: "4px",
-                borderRadius: "4px"
-              }}
+          <button
+            className={`search-enhance-btn ${isContentSearch ? "active" : ""}`}
+            onClick={() => setIsContentSearch(!isContentSearch)}
+            title={isContentSearch ? "切换为普通标题搜索" : "全局聊天内容搜索 (✨)"}
+            style={{
+              position: "absolute",
+              right: "8px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: isContentSearch ? "var(--color-primary)" : "var(--text-secondary)",
+              transition: "var(--transition-smooth)",
+              padding: "4px",
+              borderRadius: "4px"
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              <svg 
-                width="14" 
-                height="14" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="2.5" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-              >
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                <line x1="8" y1="9" x2="14" y2="9"></line>
-                <line x1="8" y1="13" x2="12" y2="13"></line>
-              </svg>
-            </button>
-          )}
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              <line x1="8" y1="9" x2="14" y2="9"></line>
+              <line x1="8" y1="13" x2="12" y2="13"></line>
+            </svg>
+          </button>
         </div>
       </div>
 

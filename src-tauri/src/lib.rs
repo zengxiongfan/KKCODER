@@ -505,6 +505,107 @@ struct SessionHistoryResult {
     messages: Vec<HistoryMessage>,
 }
 
+/// 在一段文本里按 query 截取前后 25/40 字符的 snippet（与历史面板历史搜索一致的格式）
+fn extract_text_snippet(text: &str, query_lower: &str, q_chars: usize) -> Option<String> {
+    let text_lower = text.to_lowercase();
+    let byte_idx = text_lower.find(query_lower)?;
+    let safe_byte_idx = byte_idx.min(text.len());
+    let char_idx = text[..safe_byte_idx].chars().count();
+    let chars: Vec<char> = text.chars().collect();
+    let total_chars = chars.len();
+
+    let start = if char_idx > 25 { char_idx - 25 } else { 0 };
+    let end = std::cmp::min(total_chars, char_idx + q_chars + 40);
+
+    let sub: String = chars[start..end].iter().collect();
+    let mut snippet = sub.replace('\r', " ").replace('\n', " ").trim().to_string();
+    if start > 0 {
+        snippet = format!("...{}", snippet);
+    }
+    if end < total_chars {
+        snippet = format!("{}...", snippet);
+    }
+    Some(snippet)
+}
+
+/// Claude Code 路径：按行扫描原始 JSONL，对每行做子串过滤再反序列化解析
+fn search_claude_session(
+    agent_session_id: &str,
+    project_path: &str,
+    _query: &str,
+    query_lower: &str,
+    q_chars: usize,
+) -> Option<Vec<String>> {
+    let jsonl_path = find_claude_jsonl(agent_session_id, project_path)?;
+    let file = std::fs::File::open(&jsonl_path).ok()?;
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+
+    let mut snippets = Vec::new();
+    for line in reader.lines() {
+        let line_str = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // 快速子串过滤，大幅减少 JSON 反序列化的开销
+        if line_str.to_lowercase().contains(query_lower) {
+            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                let typ = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                let text = if typ == "user" {
+                    extract_message_content(&obj)
+                } else if typ == "assistant" {
+                    extract_assistant_text(&obj)
+                } else if typ == "last-prompt" {
+                    obj.get("lastPrompt")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                } else {
+                    String::new()
+                };
+
+                if let Some(snippet) = extract_text_snippet(&text, query_lower, q_chars) {
+                    snippets.push(snippet);
+                    if snippets.len() >= 3 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Some(snippets)
+}
+
+/// Codex 路径：复用 read_codex_history_full 拿到结构化历史，再做内存匹配
+fn search_codex_session(
+    agent_session_id: &str,
+    query_lower: &str,
+    q_chars: usize,
+) -> Option<Vec<String>> {
+    let jsonl_path = find_codex_rollout_file(agent_session_id)?;
+    let messages = read_codex_history_full(&jsonl_path);
+
+    let mut snippets = Vec::new();
+    for msg in &messages {
+        // 与历史面板默认行为一致：跳过 system 与 reasoning
+        if matches!(msg.role.as_str(), "system" | "reasoning") {
+            continue;
+        }
+        if msg.content.is_empty() {
+            continue;
+        }
+
+        if let Some(snippet) = extract_text_snippet(&msg.content, query_lower, q_chars) {
+            snippets.push(snippet);
+            if snippets.len() >= 3 {
+                break;
+            }
+        }
+    }
+    Some(snippets)
+}
+
 /// 增强全局聊天记录搜索：并行检索所有非删除状态会话中的实际聊天记录内容，并返回匹配高亮片段 (最多 3 条)
 #[tauri::command]
 fn search_session_contents(query: String) -> Result<Vec<ContentSearchResult>, String> {
@@ -536,73 +637,32 @@ fn search_session_contents(query: String) -> Result<Vec<ContentSearchResult>, St
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();
 
+    let q_chars = query.chars().count();
     for (session_id, session_type, agent_session_id, project_path) in sessions {
-        if session_type != "claude" {
+        // 跳过未绑定 agent_session_id 的会话（新建 Codex tab 在首次发消息前 UUID 还没回填，找不到 rollout 文件）
+        if agent_session_id.is_empty() {
             continue;
         }
 
-        if let Some(jsonl_path) = find_claude_jsonl(&agent_session_id, &project_path) {
-            if let Ok(file) = std::fs::File::open(&jsonl_path) {
-                use std::io::{BufRead, BufReader};
-                let reader = BufReader::new(file);
+        let snippets_opt: Option<Vec<String>> = match session_type.as_str() {
+            "claude" => search_claude_session(
+                &agent_session_id,
+                &project_path,
+                &query,
+                &query_lower,
+                q_chars,
+            ),
+            "codex" => search_codex_session(&agent_session_id, &query_lower, q_chars),
+            // 其它类型（含遗留 "pi"）：跳过
+            _ => None,
+        };
 
-                let mut snippets = Vec::new();
-                for line in reader.lines() {
-                    let line_str = match line {
-                        Ok(l) => l,
-                        Err(_) => continue,
-                    };
-
-                    // 快速子串过滤，大幅减少 JSON 反序列化的开销
-                    if line_str.to_lowercase().contains(&query_lower) {
-                        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                            let typ = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                            let text = if typ == "user" {
-                                extract_message_content(&obj)
-                            } else if typ == "assistant" {
-                                extract_assistant_text(&obj)
-                            } else if typ == "last-prompt" {
-                                obj.get("lastPrompt").and_then(|v| v.as_str()).unwrap_or("").to_string()
-                            } else {
-                                String::new()
-                            };
-
-                            let text_lower = text.to_lowercase();
-                            if let Some(byte_idx) = text_lower.find(&query_lower) {
-                                // 将字节索引转换为字符索引，确保在多字节字符（如中文）下切片安全
-                                let char_idx = text[..byte_idx].chars().count();
-                                let chars: Vec<char> = text.chars().collect();
-                                let total_chars = chars.len();
-
-                                // 适当增加上下文提取范围 (前 25 字符，后 40 字符)
-                                let start = if char_idx > 25 { char_idx - 25 } else { 0 };
-                                let end = std::cmp::min(total_chars, char_idx + query.chars().count() + 40);
-                                
-                                let sub: String = chars[start..end].iter().collect();
-                                let mut snippet = sub.replace('\r', " ").replace('\n', " ").trim().to_string();
-
-                                if start > 0 {
-                                    snippet = format!("...{}", snippet);
-                                }
-                                if end < total_chars {
-                                    snippet = format!("{}...", snippet);
-                                }
-
-                                snippets.push(snippet);
-                                if snippets.len() >= 3 {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if !snippets.is_empty() {
-                    results.push(ContentSearchResult {
-                        session_id: session_id.clone(),
-                        snippets,
-                    });
-                }
+        if let Some(snippets) = snippets_opt {
+            if !snippets.is_empty() {
+                results.push(ContentSearchResult {
+                    session_id: session_id.clone(),
+                    snippets,
+                });
             }
         }
     }
