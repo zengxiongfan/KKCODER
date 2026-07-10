@@ -4697,7 +4697,6 @@ input:checked + .switch-slider:before {
 /* 文件图标 */
 .git-file-icon {
   flex-shrink: 0;
-  opacity: 0.4;
 }
 
 /* 文件名 */
