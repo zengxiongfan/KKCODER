@@ -1332,6 +1332,162 @@ body {
   box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
 }
 
+/* CLI 工具检测结果 */
+.cli-check-result {
+  padding: 12px 14px;
+  background-color: var(--bg-terminal, #1e1e2e);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.cli-check-latest,
+.cli-check-outdated {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.cli-check-latest {
+  color: var(--color-green, #22c55e);
+}
+
+.cli-check-outdated {
+  color: var(--text-primary);
+  align-items: flex-start;
+}
+
+.cli-check-icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cli-check-latest .cli-check-icon {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: var(--color-green, #22c55e);
+}
+
+.cli-check-outdated .cli-check-icon {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  font-size: 14px;
+}
+
+.cli-check-version {
+  margin-left: auto;
+  font-family: "Cascadia Mono", "Fira Code", "Consolas", monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cli-check-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cli-check-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* 菜单项内图标对齐 */
+.settings-menu-item > svg {
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+.settings-menu-item > span {
+  vertical-align: middle;
+}
+
+/* ==================== CLI 工具面板 (Claude Code / Codex) ==================== */
+
+.cli-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 0;
+}
+
+.cli-tool-header > svg {
+  flex-shrink: 0;
+}
+
+.cli-tool-header-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cli-tool-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cli-tool-version {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cli-tool-version.missing {
+  color: var(--color-danger, #e5484d);
+}
+
+/* npm 命令展示行 */
+.cli-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: var(--bg-terminal, #1e1e2e);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.cli-cmd {
+  flex: 1;
+  font-family: "Cascadia Mono", "Fira Code", "Consolas", monospace;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  word-break: break-all;
+  background: transparent;
+  border: none;
+}
+
+.cli-copy-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-hover-item);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  white-space: nowrap;
+}
+
+.cli-copy-btn:hover {
+  background-color: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.cli-copy-btn.copied {
+  background-color: #16a34a;
+  color: #fff;
+  border-color: #16a34a;
+}
+
 /* 右侧主设置面板 */
 .settings-main {
   flex: 1;

@@ -1589,6 +1589,68 @@ fn write_markdown_file(path: String, filename: String, content: String) -> Resul
         .map_err(|e| format!("Failed to write file: {}", e))
 }
 
+// ==================== CLI 工具最新版本查询 ====================
+
+/// 获取 npm 可执行文件路径
+fn get_npm_command() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "npm.cmd"
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "npm"
+    }
+}
+
+/// 查询 npm 上某个包的最新版本
+fn query_npm_latest_version(package: &str) -> Result<String, String> {
+    use std::process::Command;
+
+    let npm = get_npm_command();
+
+    #[cfg(target_os = "windows")]
+    let output = {
+        use std::os::windows::process::CommandExt;
+        Command::new(npm)
+            .args(&["view", package, "version"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|e| format!("执行 npm view 失败: {}", e))?
+    };
+    #[cfg(not(target_os = "windows"))]
+    let output = Command::new(npm)
+        .args(&["view", package, "version"])
+        .output()
+        .map_err(|e| format!("执行 npm view 失败: {}", e))?;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if stdout.is_empty() {
+            Err("npm view 返回空结果".to_string())
+        } else {
+            Ok(stdout)
+        }
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(format!("npm view 失败: {}", stderr))
+    }
+}
+
+/// 查询 Claude Code 在 npm 上的最新版本
+#[tauri::command]
+fn get_claude_latest_version() -> Result<String, String> {
+    log_to_file("get_claude_latest_version called");
+    query_npm_latest_version("@anthropic-ai/claude-code")
+}
+
+/// 查询 Codex 在 npm 上的最新版本
+#[tauri::command]
+fn get_codex_latest_version() -> Result<String, String> {
+    log_to_file("get_codex_latest_version called");
+    query_npm_latest_version("@openai/codex")
+}
+
 #[tauri::command]
 fn get_claude_version() -> Result<String, String> {
     use std::process::Command;
@@ -4182,6 +4244,8 @@ pub fn run() {
             write_markdown_file,
             get_claude_version,
             get_codex_version,
+            get_claude_latest_version,
+            get_codex_latest_version,
             check_if_paths_exist,
             archive_project,
             get_archived_projects,

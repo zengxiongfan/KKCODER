@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DirectoryPickerModal } from "./DirectoryPickerModal";
+import { ClaudeIcon, CodexIcon } from "./Sidebar";
 import {
   DEFAULT_SESSION_CLEANUP_DAYS,
   MIN_SESSION_CLEANUP_DAYS,
@@ -8,6 +9,10 @@ import {
   SESSION_CLEANUP_DAYS_KEY,
   SESSION_CLEANUP_ENABLED_KEY,
 } from "../utils/sessionCleanup";
+
+// CLI 工具 npm 包名
+const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
+const CODEX_NPM_PACKAGE = "@openai/codex";
 
 // 会话名称修正 localStorage keys
 const AUTO_RENAME_ON_STARTUP_KEY = "kkcoder_setting_auto_rename_startup";
@@ -495,8 +500,139 @@ const RemoteSettingsPanel: React.FC = () => {
   );
 };
 
+// ==================== CLI 工具设置面板 (Claude Code / Codex) ====================
+
+interface CliToolPanelProps {
+  Icon: React.FC<{ size?: number; color?: string }>;
+  iconColor: string;
+  title: string;
+  packageName: string;
+  installedVersion: string;
+  onCheckLatest: () => Promise<{ latest: string; isLatest: boolean }>;
+}
+
+const CliToolPanel: React.FC<CliToolPanelProps> = ({
+  Icon,
+  iconColor,
+  title,
+  packageName,
+  installedVersion,
+  onCheckLatest,
+}) => {
+  const installCmd = `npm install -g ${packageName}`;
+  const updateCmd = `npm install -g ${packageName}@latest`;
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [checking, setChecking] = useState<boolean>(false);
+  const [latestResult, setLatestResult] = useState<{
+    latest: string;
+    isLatest: boolean;
+  } | null>(null);
+
+  const handleCopy = (cmd: string) => {
+    navigator.clipboard.writeText(cmd).then(() => {
+      setCopiedCmd(cmd);
+      setTimeout(() => setCopiedCmd(null), 1500);
+    }).catch(() => {});
+  };
+
+  const versionLabel = installedVersion && installedVersion !== title ? installedVersion : "未检测到（未安装）";
+  const versionMissing = !installedVersion || installedVersion === title;
+
+  const handleCheck = async (): Promise<void> => {
+    setChecking(true);
+    setLatestResult(null);
+    try {
+      const result = await onCheckLatest();
+      setLatestResult(result);
+    } catch (err) {
+      setLatestResult(null);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="settings-content">
+      {/* 标题与图标 */}
+      <div className="settings-group">
+        <div className="cli-tool-header">
+          <Icon size={28} color={iconColor} />
+          <div className="cli-tool-header-info">
+            <div className="cli-tool-title">{title}</div>
+            <div className={`cli-tool-version ${versionMissing ? "missing" : ""}`}>
+              {versionMissing && <span style={{ color: "var(--color-danger, #e5484d)" }}>● </span>}
+              {versionLabel}
+            </div>
+          </div>
+          <button
+            className="settings-toggle-btn"
+            onClick={handleCheck}
+            disabled={checking}
+            title="联网检测 npm 上的最新版本"
+          >
+            {checking ? "检测中..." : "检测版本更新"}
+          </button>
+        </div>
+      </div>
+
+      {/* 检测结果 */}
+      {latestResult && (
+        <div className="settings-group">
+          <div className="settings-group-label">版本更新检测</div>
+          <div className="cli-check-result">
+            {latestResult.isLatest ? (
+              <div className="cli-check-latest">
+                <span className="cli-check-icon">✓</span>
+                <span>当前已是最新版本</span>
+                <span className="cli-check-version">v{latestResult.latest}</span>
+              </div>
+            ) : (
+              <div className="cli-check-outdated">
+                <span className="cli-check-icon">⬆</span>
+                <div className="cli-check-info">
+                  <span>有新版本可用：<strong>v{latestResult.latest}</strong></span>
+                  <span className="cli-check-hint">请使用下方更新命令升级</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* npm 安装命令 */}
+      <div className="settings-group">
+        <div className="settings-group-label">安装命令</div>
+        <div className="cli-cmd-row">
+          <code className="cli-cmd">{installCmd}</code>
+          <button
+            className={`cli-copy-btn ${copiedCmd === installCmd ? "copied" : ""}`}
+            onClick={() => handleCopy(installCmd)}
+          >
+            {copiedCmd === installCmd ? "已复制" : "复制"}
+          </button>
+        </div>
+      </div>
+
+      {/* npm 更新命令 */}
+      <div className="settings-group">
+        <div className="settings-group-label">更新命令（安装最新版）</div>
+        <div className="cli-cmd-row">
+          <code className="cli-cmd">{updateCmd}</code>
+          <button
+            className={`cli-copy-btn ${copiedCmd === updateCmd ? "copied" : ""}`}
+            onClick={() => handleCopy(updateCmd)}
+          >
+            {copiedCmd === updateCmd ? "已复制" : "复制"}
+          </button>
+        </div>
+      </div>
+
+    </div>
+  );
+};
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onSessionsRenamed }) => {
-  const [activeMenu, setActiveMenu] = useState<"general" | "sessions" | "remote" | "about">("general");
+  const [activeMenu, setActiveMenu] = useState<"claude" | "codex" | "general" | "sessions" | "remote" | "about">("claude");
   const [showFilePicker, setShowFilePicker] = useState(false);
 
   useEffect(() => {
@@ -531,6 +667,76 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
     const val = localStorage.getItem("kkcoder_setting_notify_threshold");
     return val === null ? 2.0 : parseFloat(val);
   });
+
+  // --- Claude Code / Codex CLI 工具状态 ---
+  const [claudeInstalled, setClaudeInstalled] = useState<string>(() => {
+    return localStorage.getItem("kkcoder_cached_claude_version") || "";
+  });
+  const [codexInstalled, setCodexInstalled] = useState<string>(() => {
+    return localStorage.getItem("kkcoder_cached_codex_version") || "";
+  });
+
+  // 从 "Claude Code 2.1.206" 提取纯版本号 "2.1.206"
+  const extractVersionNumber = (ver: string): string => {
+    const match = ver.match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : ver.replace(/^[^\d]*/, "").trim();
+  };
+
+  // 刷新本地已安装版本
+  const refreshClaudeInstalled = () => {
+    invoke<string>("get_claude_version")
+      .then((ver) => {
+        setClaudeInstalled(ver);
+        localStorage.setItem("kkcoder_cached_claude_version", ver);
+        window.dispatchEvent(new CustomEvent("kkcoder-claude-version-change", { detail: ver }));
+      })
+      .catch(() => {});
+  };
+  const refreshCodexInstalled = () => {
+    invoke<string>("get_codex_version")
+      .then((ver) => {
+        const normalized = (() => {
+          const trimmed = ver.trim();
+          const m = trimmed.match(/^codex[-_]?(cli|client)?\s*[:\-]?\s*(.*)$/i);
+          if (m) {
+            const version = (m[2] || "").trim();
+            return version ? `Codex ${version}` : "Codex";
+          }
+          return trimmed ? `Codex ${trimmed}` : "Codex";
+        })();
+        setCodexInstalled(normalized);
+        localStorage.setItem("kkcoder_cached_codex_version", normalized);
+        window.dispatchEvent(new CustomEvent("kkcoder-codex-version-change", { detail: normalized }));
+      })
+      .catch(() => {});
+  };
+
+  // 检测 Claude Code 最新版本（返回 npm 最新版号 + 是否与本地一致）
+  const checkClaudeLatest = async (): Promise<{ latest: string; isLatest: boolean }> => {
+    const latest = await invoke<string>("get_claude_latest_version");
+    // 同步刷新本地版本显示
+    refreshClaudeInstalled();
+    const latestNum = latest.trim();
+    const installedNum = extractVersionNumber(claudeInstalled);
+    const isLatest = installedNum === latestNum;
+    return { latest: latestNum, isLatest };
+  };
+
+  // 检测 Codex 最新版本
+  const checkCodexLatest = async (): Promise<{ latest: string; isLatest: boolean }> => {
+    const latest = await invoke<string>("get_codex_latest_version");
+    refreshCodexInstalled();
+    const latestNum = latest.trim();
+    const installedNum = extractVersionNumber(codexInstalled);
+    const isLatest = installedNum === latestNum;
+    return { latest: latestNum, isLatest };
+  };
+
+  useEffect(() => {
+    refreshClaudeInstalled();
+    refreshCodexInstalled();
+  }, []);
+
   const [playSound, setPlaySound] = useState<boolean>(() => {
     const val = localStorage.getItem("kkcoder_setting_play_sound");
     return val === null ? true : val === "true";
@@ -951,6 +1157,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
         <div className="settings-sidebar">
           <div className="settings-sidebar-header">设置</div>
           <button
+            className={`settings-menu-item ${activeMenu === "claude" ? "active" : ""}`}
+            onClick={() => setActiveMenu("claude")}
+          >
+            <ClaudeIcon size={16} />
+            <span>Claude Code</span>
+          </button>
+          <button
+            className={`settings-menu-item ${activeMenu === "codex" ? "active" : ""}`}
+            onClick={() => setActiveMenu("codex")}
+          >
+            <CodexIcon size={16} />
+            <span>Codex</span>
+          </button>
+          <button
             className={`settings-menu-item ${activeMenu === "general" ? "active" : ""}`}
             onClick={() => setActiveMenu("general")}
           >
@@ -981,7 +1201,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
           {/* 头部标题与关闭按钮 */}
           <div className="settings-header">
             <span className="settings-title">
-              {activeMenu === "general" ? "通用" : activeMenu === "sessions" ? "终端设置" : activeMenu === "remote" ? "远程开发" : "关于"}
+              {activeMenu === "claude" ? "Claude Code" : activeMenu === "codex" ? "Codex" : activeMenu === "general" ? "通用" : activeMenu === "sessions" ? "终端设置" : activeMenu === "remote" ? "远程开发" : "关于"}
             </span>
             <button className="settings-close" onClick={onClose}>
               ×
@@ -989,7 +1209,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
           </div>
 
           <div className="settings-body">
-            {activeMenu === "general" ? (
+            {activeMenu === "claude" ? (
+              <CliToolPanel
+                key="claude"
+                Icon={ClaudeIcon}
+                iconColor="#D97757"
+                title="Claude Code"
+                packageName={CLAUDE_NPM_PACKAGE}
+                installedVersion={claudeInstalled}
+                onCheckLatest={checkClaudeLatest}
+              />
+            ) : activeMenu === "codex" ? (
+              <CliToolPanel
+                key="codex"
+                Icon={CodexIcon}
+                iconColor="var(--color-green, #22c55e)"
+                title="Codex"
+                packageName={CODEX_NPM_PACKAGE}
+                installedVersion={codexInstalled}
+                onCheckLatest={checkCodexLatest}
+              />
+            ) : activeMenu === "general" ? (
               <div className="settings-content">
                 {/* 1. 主题风格 */}
                 <div className="settings-group">
