@@ -65,6 +65,34 @@ function getFolderName(path: string): string {
 const CLAUDE_VERSION_CACHE_KEY = "kkcoder_cached_claude_version";
 const CODEX_VERSION_CACHE_KEY = "kkcoder_cached_codex_version";
 
+// 将 codex 版本字符串统一规范化为 "Codex <version>"，处理 "0.1.0"、"codex 0.1.0"、"codex-cli 0.144.1" 等
+function normalizeCodexVersion(ver: string): string {
+  const trimmed = ver.trim();
+  const match = trimmed.match(/^codex[-_]?(cli|client)?\s*[:\-]?\s*(.*)$/i);
+  if (match) {
+    const version = (match[2] || "").trim();
+    return version ? `Codex ${version}` : "Codex";
+  }
+  // 不以 codex 开头但非空，补上 "Codex " 前缀
+  return trimmed ? `Codex ${trimmed}` : "Codex";
+}
+
+// 版本标签组件：裸名 + 没拿到真实版本时显示"未安装"并标红
+function VersionLabel({ name, version, Icon, color }: {
+  name: string;
+  version: string;
+  Icon: React.FC<{ size?: number; color?: string }>;
+  color: string;
+}) {
+  const missing = version.trim() === name;
+  return (
+    <span className={missing ? "empty-state-version-item missing" : "empty-state-version-item"}>
+      <Icon size={16} color={missing ? "var(--color-danger, #e5484d)" : color} />
+      {missing ? `${name} 未安装` : version}
+    </span>
+  );
+}
+
 function App() {
 
   const appWindow = useMemo(() => getCurrentWindow(), []);
@@ -149,7 +177,8 @@ function App() {
   });
 
   const [codexVersion, setCodexVersion] = useState<string>(() => {
-    return localStorage.getItem(CODEX_VERSION_CACHE_KEY) || "Codex";
+    const cached = localStorage.getItem(CODEX_VERSION_CACHE_KEY);
+    return cached ? normalizeCodexVersion(cached) : "Codex";
   });
 
   // 侧边栏拖拽调宽状态与拖拽处理
@@ -1250,8 +1279,10 @@ function App() {
     const fetchCodexVersion = () => {
       invoke<string>("get_codex_version")
         .then((ver) => {
-          setCodexVersion(ver);
-          localStorage.setItem(CODEX_VERSION_CACHE_KEY, ver);
+          // 兜底标准化：始终规范化为 "Codex <version>"，避免缓存残留 "codex-cli" 之类
+          const normalized = normalizeCodexVersion(ver);
+          setCodexVersion(normalized);
+          localStorage.setItem(CODEX_VERSION_CACHE_KEY, normalized);
         })
         .catch(() => {});
     };
@@ -2379,7 +2410,12 @@ function App() {
                   <div className="empty-state-title">KKCoder AI 终端管理器</div>
                   <div className="empty-state-desc">
                     当前没有处于活动状态的会话标签。
-                    请选择左上角的 Agent 类型并点击“**新建 AI 终端**”按钮来开启一个托管终端。
+                    请选择左上角的 Agent 类型并点击“**新建会话**”按钮来开启一个托管终端。
+                  </div>
+                  <div className="empty-state-versions">
+                    <VersionLabel name="Claude Code" version={claudeVersion} Icon={ClaudeIcon} color="#D97757" />
+                    <span className="empty-state-version-sep">|</span>
+                    <VersionLabel name="Codex" version={codexVersion} Icon={CodexIcon} color="var(--color-green)" />
                   </div>
                 </div>
               ) : (
@@ -2762,9 +2798,7 @@ function App() {
                 >
                   {activeSession.type === "claude" ? claudeVersion : codexVersion}
                 </span>
-              ) : (
-                <span>{claudeVersion} 准备就绪</span>
-              )}
+              ) : null}
             </div>
           </div>
         </main>

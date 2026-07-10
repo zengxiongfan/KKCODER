@@ -1659,9 +1659,24 @@ fn get_codex_version() -> Result<String, String> {
     match run_cmd() {
         Ok(stdout) => {
             if !stdout.is_empty() {
-                // codex --version 通常输出类似 "0.1.0" 或 "codex 0.1.0"
-                if stdout.to_lowercase().contains("codex") {
-                    return Ok(stdout);
+                // codex --version 可能输出 "0.1.0"、"codex 0.1.0" 或 "codex-cli 0.144.1"
+                // 统一规范化为 "Codex <version>" 格式
+                let lower = stdout.to_lowercase();
+                if let Some(pos) = lower.find("codex") {
+                    // 截掉 "codex" 前缀，再去掉 "-cli" / "_cli" 等后缀连接符
+                    let mut version = stdout[pos + 5..].trim();
+                    // 反复剥离 "-cli"、"_cli"、"-client" 等已知后缀
+                    for suffix in &["-cli", "_cli", "-client", "_client"] {
+                        if let Some(stripped) = version.strip_prefix(suffix) {
+                            version = stripped;
+                            break;
+                        }
+                    }
+                    let version = version.trim_matches(|c: char| c == '-' || c == '_' || c == ' ');
+                    if version.is_empty() {
+                        return Ok("Codex".to_string());
+                    }
+                    return Ok(format!("Codex {}", version));
                 }
                 return Ok(format!("Codex {}", stdout));
             }
