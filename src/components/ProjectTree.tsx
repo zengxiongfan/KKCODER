@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { 
-  Folder, 
-  FolderOpen, 
-  FileText, 
-  Search, 
-  RefreshCw, 
-  ChevronRight, 
-  ChevronDown 
+import {
+  Folder,
+  FolderOpen,
+  Search,
+  RefreshCw,
+  ChevronRight,
+  ChevronDown
 } from "lucide-react";
+import { FileIcon } from "../utils/fileIcons";
 
 interface FileEntry {
   name: string;
@@ -313,7 +313,7 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
             {node.isDir ? (
               shouldShowChildren ? <FolderOpen size={14} className="folder-icon open" /> : <Folder size={14} className="folder-icon" />
             ) : (
-              <FileText size={14} className="file-icon" />
+              <FileIcon name={node.name} size={14} />
             )}
           </span>
           <span className="tree-node-name" title={node.name}>

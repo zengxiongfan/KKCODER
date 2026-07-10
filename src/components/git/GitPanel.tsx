@@ -33,6 +33,7 @@ import {
   Folder,
 } from "lucide-react";
 import { DiffViewerModal } from "./DiffViewerModal";
+import { FileIcon } from "../../utils/fileIcons";
 
 // 剪贴板复制辅助
 const copyToClipboard = async (text: string) => {
@@ -386,7 +387,7 @@ const GitTreeNodeRow: React.FC<{
                   : "暂存"
           }
         />
-        <FileText size={12} className="git-file-icon" />
+        <FileIcon name={node.name} size={12} className="git-file-icon" />
         <span className="git-file-name" style={{ color: fileNameColor }}>{node.name}</span>
         {canDiscard && (
           <button

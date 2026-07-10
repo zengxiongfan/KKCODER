@@ -2992,9 +2992,47 @@ input:checked + .switch-slider:before {
   opacity: 0.85;
 }
 
+/* 文件类型图标 —— 按语义类别着色，全部使用 currentColor 以便适配 7 套主题。
+   颜色采用「图标基色 + 透明度」的方式，既保留辨识度又不会在高饱和主题下刺眼。 */
 .file-icon {
   color: var(--text-secondary);
   opacity: 0.75;
+}
+
+/* 代码类（ts/js/py/rs/go … 紫蓝调 —— 象征「程序」） */
+.file-icon-code {
+  color: var(--color-primary);
+  opacity: 0.8;
+}
+
+/* 数据 / 结构化配置类（json/yaml/xml/csv … 青绿调 —— 象征「数据」） */
+.file-icon-data {
+  color: #2dd4bf;
+  opacity: 0.82;
+}
+
+/* 媒体类（图片 / 视频 / 音频 … 品红紫调 —— 象征「创意」） */
+.file-icon-media {
+  color: #c084fc;
+  opacity: 0.82;
+}
+
+/* 文档类（md/txt/pdf/docx … 翠绿调 —— 象征「文字」） */
+.file-icon-doc {
+  color: #4ade80;
+  opacity: 0.82;
+}
+
+/* 配置基础设施类（ini/env/pem/docker … 与文件夹同色橙调 —— 同属「工程」语义） */
+.file-icon-config {
+  color: var(--color-orange);
+  opacity: 0.82;
+}
+
+/* 兜底类（未知扩展名 —— 继承基色，衬托出「不确定」） */
+.file-icon-other {
+  color: var(--text-secondary);
+  opacity: 0.6;
 }
 
 .tree-node-name {
