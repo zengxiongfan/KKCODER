@@ -5,6 +5,7 @@ use tauri::{State, AppHandle, Emitter};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
 use std::io::Write;
 use chrono::Datelike;
+use dirs;
 
 mod remote;
 mod commands;
@@ -1042,13 +1043,19 @@ fn spawn_terminal(
     }
 
     // 物理路径预检，防止 ConPTY 引擎工作目录无效导致进程 Panic 崩溃闪退
-    let path = std::path::Path::new(&directory);
-    if !path.exists() || !path.is_dir() {
-        let err_msg = format!("项目目录路径不存在或不是一个有效文件夹，请核对路径: {}", directory);
-        log_to_file(&format!("spawn_terminal path error: {}", err_msg));
-        return Err(err_msg);
-    }
-    log_to_file("spawn_terminal directory exists and is a valid directory.");
+    // 如果路径为空或不存在，回退到用户主目录
+    let effective_dir = if directory.trim().is_empty() {
+        dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+    } else {
+        let p = std::path::Path::new(&directory);
+        if p.exists() && p.is_dir() {
+            p.to_path_buf()
+        } else {
+            log_to_file(&format!("spawn_terminal: directory '{}' not found, falling back to home", directory));
+            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+        }
+    };
+    log_to_file(&format!("spawn_terminal using directory: {}", effective_dir.display()));
 
     log_to_file("Obtaining native PTY system...");
     let pty_system = native_pty_system();
@@ -1080,7 +1087,7 @@ fn spawn_terminal(
     let mut cmd = CommandBuilder::new("bash");
 
     log_to_file(&format!("Setting slave working directory to: {}", directory));
-    cmd.cwd(std::path::PathBuf::from(&directory));
+    cmd.cwd(effective_dir);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "KKCoder");
