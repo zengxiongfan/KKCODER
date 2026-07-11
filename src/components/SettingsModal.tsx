@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { DirectoryPickerModal } from "./DirectoryPickerModal";
-import { ClaudeIcon, CodexIcon } from "./Sidebar";
+import { ClaudeIcon, CodexIcon, CcSwitchIcon } from "./Sidebar";
 import {
   DEFAULT_SESSION_CLEANUP_DAYS,
   MIN_SESSION_CLEANUP_DAYS,
@@ -632,7 +632,7 @@ const CliToolPanel: React.FC<CliToolPanelProps> = ({
 };
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onSessionsRenamed }) => {
-  const [activeMenu, setActiveMenu] = useState<"claude" | "codex" | "general" | "sessions" | "remote" | "about">("claude");
+  const [activeMenu, setActiveMenu] = useState<"claude" | "codex" | "ccswitch" | "general" | "sessions" | "remote" | "about">("claude");
   const [showFilePicker, setShowFilePicker] = useState(false);
 
   useEffect(() => {
@@ -1160,15 +1160,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
             className={`settings-menu-item ${activeMenu === "claude" ? "active" : ""}`}
             onClick={() => setActiveMenu("claude")}
           >
-            <ClaudeIcon size={16} />
+            <ClaudeIcon size={16} color="#D97757" />
             <span>Claude Code</span>
           </button>
           <button
             className={`settings-menu-item ${activeMenu === "codex" ? "active" : ""}`}
             onClick={() => setActiveMenu("codex")}
           >
-            <CodexIcon size={16} />
+            <CodexIcon size={16} color="var(--color-green, #22c55e)" />
             <span>Codex</span>
+          </button>
+          <button
+            className={`settings-menu-item ${activeMenu === "ccswitch" ? "active" : ""}`}
+            onClick={() => setActiveMenu("ccswitch")}
+          >
+            <CcSwitchIcon size={16} />
+            <span>CC Switch</span>
           </button>
           <button
             className={`settings-menu-item ${activeMenu === "general" ? "active" : ""}`}
@@ -1201,7 +1208,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
           {/* 头部标题与关闭按钮 */}
           <div className="settings-header">
             <span className="settings-title">
-              {activeMenu === "claude" ? "Claude Code" : activeMenu === "codex" ? "Codex" : activeMenu === "general" ? "通用" : activeMenu === "sessions" ? "终端设置" : activeMenu === "remote" ? "远程开发" : "关于"}
+              {activeMenu === "claude" ? "Claude Code" : activeMenu === "codex" ? "Codex" : activeMenu === "ccswitch" ? "CC Switch" : activeMenu === "general" ? "通用" : activeMenu === "sessions" ? "终端设置" : activeMenu === "remote" ? "远程开发" : "关于"}
             </span>
             <button className="settings-close" onClick={onClose}>
               ×
@@ -1229,6 +1236,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
                 installedVersion={codexInstalled}
                 onCheckLatest={checkCodexLatest}
               />
+            ) : activeMenu === "ccswitch" ? (
+              <div className="settings-content">
+                <div className="settings-group">
+                  <div className="cli-tool-header">
+                    <CcSwitchIcon size={28} />
+                    <div className="cli-tool-header-info">
+                      <div className="cli-tool-title">CC Switch</div>
+                      <div className="cli-tool-version">
+                        {ccswitchPath ? ccswitchPath : "未配置路径"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="settings-group">
+                  <div className="settings-group-label">可执行文件路径</div>
+                  <div style={{ display: "flex", gap: "8px", width: "100%" }}>
+                    <input
+                      type="text"
+                      placeholder="例如: C:\Program Files\ccswitch\ccswitch.exe"
+                      value={ccswitchPath}
+                      onChange={(e) => setCcswitchPath(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: "6px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: "var(--bg-input)",
+                        color: "var(--text-primary)",
+                        fontSize: "13px",
+                        outline: "none",
+                        transition: "border-color var(--transition-smooth)",
+                      }}
+                      onFocus={(e) => {
+                        e.target.style.borderColor = "var(--color-primary)";
+                      }}
+                      onBlurCapture={(e) => {
+                        e.target.style.borderColor = "var(--border-color)";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowFilePicker(true)}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: "var(--bg-hover-item)",
+                        color: "var(--text-primary)",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      浏览...
+                    </button>
+                  </div>
+                </div>
+                <div className="settings-group">
+                  <button
+                    className="settings-toggle-btn"
+                    onClick={() => {
+                      const path = localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+                      if (!path) {
+                        alert("请先在「CC Switch」中配置 ccswitch.exe 的路径。");
+                        return;
+                      }
+                      invoke("launch_ccswitch", { path }).catch((err) => {
+                        alert(`启动 ccswitch.exe 失败:\n${err}`);
+                      });
+                    }}
+                  >
+                    打开 CC Switch
+                  </button>
+                </div>
+              </div>
             ) : activeMenu === "general" ? (
               <div className="settings-content">
                 {/* 1. 主题风格 */}
@@ -1560,59 +1641,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
             ) : activeMenu === "sessions" ? (
               <div className="settings-content">
-                {/* ccswitch.exe 路径 */}
-                <div className="settings-group">
-                  <div className="settings-group-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <span>ccswitch.exe 路径</span>
-                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", fontWeight: "normal" }}>
-                      （点击右上角图标时启动的程序路径）
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "8px", width: "100%" }}>
-                    <input
-                      type="text"
-                      placeholder="例如: C:\Program Files\ccswitch\ccswitch.exe"
-                      value={ccswitchPath}
-                      onChange={(e) => setCcswitchPath(e.target.value)}
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: "var(--bg-input)",
-                        color: "var(--text-primary)",
-                        fontSize: "13px",
-                        outline: "none",
-                        transition: "border-color var(--transition-smooth)",
-                      }}
-                      onFocus={(e) => {
-                        e.target.style.borderColor = "var(--color-primary)";
-                      }}
-                      onBlurCapture={(e) => {
-                        e.target.style.borderColor = "var(--border-color)";
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowFilePicker(true)}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: "var(--bg-hover-item)",
-                        color: "var(--text-primary)",
-                        fontSize: "12px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      浏览...
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ borderTop: "1px solid var(--border-color)", margin: "8px 0" }} />
-
-                {/* 1. 回滚行数 */}
                 <div className="settings-group">
                   <div className="settings-group-label" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                     <span>回滚行数</span>
