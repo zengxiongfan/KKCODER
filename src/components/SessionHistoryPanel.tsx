@@ -82,6 +82,23 @@ function getAssistantLabel(agentType: string): string {
   return agentType === "codex" ? "CODEX" : "CLAUDE";
 }
 
+// ==================== 筛选 chips 配置 ====================
+// 每个 chip 控制一组 role，点亮 = 显示，芯片之间是 OR（并集）关系。
+// system 不在任何 chip 中，保持始终隐藏（与旧默认行为一致）。
+interface FilterChipDef {
+  key: string;
+  label: string | ((agentType: string) => string);
+  roles: string[];
+  color: string;
+  defaultOn: boolean;
+}
+
+const FILTER_CHIPS: FilterChipDef[] = [
+  { key: "showUser",      label: "YOU",     roles: ["user"], color: "#3b82f6", defaultOn: true },
+  { key: "showAssistant",  label: (t) => getAssistantLabel(t), roles: ["assistant"], color: "#D97757", defaultOn: true },
+  { key: "showToolCalls", label: "工具调用", roles: ["tool_use", "tool_result", "reasoning"], color: "#8b5cf6", defaultOn: false },
+];
+
 // ==================== 消息卡片组件 ====================
 const MessageCard: React.FC<{
   msg: HistoryMessage;
@@ -208,8 +225,10 @@ export const SessionHistoryPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [debouncedQuery, setDebouncedQuery] = useState<string>("");
-  /** 是否显示工具调用消息（TOOL/RESULT）；默认隐藏 */
-  const [showToolCalls, setShowToolCalls] = useState<boolean>(false);
+  /** 筛选芯片开关状态：key 对应 FILTER_CHIPS[].key，value 为是否点亮 */
+  const [chipState, setChipState] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(FILTER_CHIPS.map((c) => [c.key, c.defaultOn]))
+  );
   /** 当前激活的命中索引（1-based 展示，0-based 内部存储） */
   const [currentHitIndex, setCurrentHitIndex] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -275,20 +294,27 @@ export const SessionHistoryPanel: React.FC<Props> = ({
     return () => window.removeEventListener("keydown", handler, true);
   }, [open, onClose]);
 
-  // 过滤消息（搜索）
+  // 过滤消息（芯片 + 搜索）
   const filteredMessages = useMemo<HistoryMessage[]>(() => {
     if (!result?.messages) return [];
     const q = debouncedQuery.trim().toLowerCase();
+
+    // 当前点亮芯片覆盖的角色并集（OR）：消息 role 属于任一亮芯片即保留
+    const activeRoles = new Set<string>();
+    FILTER_CHIPS.forEach((c) => {
+      if (chipState[c.key]) c.roles.forEach((r) => activeRoles.add(r));
+    });
+
     return result.messages.filter((m) => {
-      // 工具调用过滤：默认隐藏 tool_use / tool_result / reasoning（模型思考过程）
-      if (!showToolCalls && (m.role === "tool_use" || m.role === "tool_result" || m.role === "reasoning")) {
-        return false;
-      }
+      if (!activeRoles.has(m.role)) return false;
       if (!q) return true;
       const hay = `${m.content || ""} ${m.toolName || ""} ${m.model || ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [result, debouncedQuery, showToolCalls]);
+  }, [result, debouncedQuery, chipState]);
+
+  /** 所有芯片都已关闭（用于空态提示） */
+  const allOff = FILTER_CHIPS.every((c) => !chipState[c.key]);
 
   // 命中数变化时重置索引，并保证不越界
   useEffect(() => {
@@ -400,17 +426,27 @@ export const SessionHistoryPanel: React.FC<Props> = ({
               </button>
             )}
           </div>
-          <label
-            className="history-panel-tool-toggle"
-            title="显示 / 隐藏工具调用消息（TOOL / RESULT）"
-          >
-            <input
-              type="checkbox"
-              checked={showToolCalls}
-              onChange={(e) => setShowToolCalls(e.target.checked)}
-            />
-            <span>工具调用</span>
-          </label>
+          <div className="history-panel-filter-chips">
+            {FILTER_CHIPS.map((chip) => {
+              const on = chipState[chip.key];
+              const label = typeof chip.label === "function"
+                ? chip.label(result?.agentType ?? "claude")
+                : chip.label;
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  className={"history-filter-chip" + (on ? " is-on" : "")}
+                  style={{ "--chip-color": chip.color } as React.CSSProperties}
+                  title={on ? `隐藏「${label}」` : `显示「${label}」`}
+                  onClick={() => setChipState((s) => ({ ...s, [chip.key]: !s[chip.key] }))}
+                >
+                  <span className="history-filter-chip-dot" />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           <div className="history-panel-hitnav">
             {debouncedQuery && (
               <span className="history-panel-hitcount">
@@ -488,8 +524,15 @@ export const SessionHistoryPanel: React.FC<Props> = ({
 
           {!loading && !error && result && result.available && filteredMessages.length === 0 && (
             <div className="history-panel-empty">
-              <div className="history-panel-empty-icon">🔍</div>
-              {debouncedQuery ? (
+              <div className="history-panel-empty-icon">{allOff ? "🎛️" : "🔍"}</div>
+              {allOff ? (
+                <>
+                  <div>所有筛选类别都已关闭</div>
+                  <div style={{ fontSize: "12px", opacity: 0.7, marginTop: 8 }}>
+                    点亮上方至少一个类别以查看消息
+                  </div>
+                </>
+              ) : debouncedQuery ? (
                 <div>没有匹配 "{debouncedQuery}" 的消息</div>
               ) : (
                 <div>该会话暂无历史消息</div>
