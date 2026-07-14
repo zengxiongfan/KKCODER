@@ -135,6 +135,16 @@ function App() {
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<"claude" | "codex">("claude");
+
+  // 统一封装「激活会话 + 同步左侧 agent 选中态」，避免被动切换路径漏同步 selector
+  const activateSession = useCallback((id: string) => {
+    setActiveSessionId(id);
+    const s = sessions.find((sess) => sess.id === id);
+    if (s) {
+      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+    }
+  }, [sessions]);
+
   const [showModal, setShowModal] = useState<boolean>(false);
   const [prefilledProjectPath, setPrefilledProjectPath] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState<boolean>(false);
@@ -1850,7 +1860,7 @@ function App() {
 
     if (activeSessionId === id) {
       if (updatedTabs.length > 0) {
-        setActiveSessionId(updatedTabs[updatedTabs.length - 1]);
+        activateSession(updatedTabs[updatedTabs.length - 1]);
       } else {
         setActiveSessionId("");
       }
@@ -1869,7 +1879,7 @@ function App() {
       if (activeSessionId === id) {
         const remaining = openTabIds.filter((tid) => tid !== id);
         if (remaining.length > 0) {
-          setActiveSessionId(remaining[remaining.length - 1]);
+          activateSession(remaining[remaining.length - 1]);
         } else {
           setActiveSessionId("");
         }
@@ -1926,7 +1936,7 @@ function App() {
       if (ids.includes(activeSessionId)) {
         const remaining = openTabIds.filter((tid) => !ids.includes(tid));
         if (remaining.length > 0) {
-          setActiveSessionId(remaining[remaining.length - 1]);
+          activateSession(remaining[remaining.length - 1]);
         } else {
           setActiveSessionId("");
         }
