@@ -5476,3 +5476,646 @@ input:checked + .switch-slider:before {
   background: rgba(239, 68, 68, 0.1);
 }
 
+
+/* ══════════════════════════════════════════════════════════════════
+   分支面板（BranchPanel）— 本地/远程分支 + 提交历史
+   ═════════════════════════════════════════════════════════════════ */
+.branch-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.branch-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 5px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  gap: 3px;
+}
+
+.branch-header-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.branch-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.branch-header-actions .git-action-btn.active {
+  color: var(--color-orange, #fab387);
+  background: rgba(250, 179, 135, 0.13);
+}
+
+.branch-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.branch-filter-icon {
+  color: var(--text-secondary);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.branch-filter-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  padding: 2px 0;
+}
+
+.branch-filter-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.branch-checkout-error {
+  padding: 6px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  font-size: 11px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.branch-checkout-error-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #f87171;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.branch-checkout-error-close:hover {
+  color: #fca5a5;
+}
+
+/* ── 分支列表 ── */
+.branch-list {
+  flex: 0 0 auto;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.branch-group {
+  padding: 2px 0 4px;
+}
+
+.branch-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  margin: 0 4px;
+}
+
+.branch-group-header:hover {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.08));
+  color: var(--text-primary);
+}
+
+.branch-group-arrow {
+  display: flex;
+  align-items: center;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+
+.branch-group-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.branch-group-label {
+  flex: 1;
+}
+
+.branch-remote-sep {
+  opacity: 0.5;
+  margin: 0 1px;
+}
+
+.branch-remote-name {
+  color: var(--color-orange, #fab387);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.branch-group-count {
+  font-size: 10px;
+  color: var(--text-secondary);
+  background: rgba(148, 163, 184, 0.13);
+  padding: 0 5px;
+  border-radius: 4px;
+  min-width: 16px;
+  text-align: center;
+  height: 15px;
+  line-height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.branch-empty-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 24px 6px;
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* ── 分支行 ── */
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 18px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  border-left: 2px solid transparent;
+  line-height: 1.5;
+  transition: background 0.1s;
+}
+
+.branch-row:hover {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
+}
+
+.branch-row.selected {
+  background: rgba(96, 165, 250, 0.14);
+  border-left-color: #60a5fa;
+}
+
+.branch-row.selected:hover {
+  background: rgba(96, 165, 250, 0.2);
+}
+
+.branch-row.current .branch-row-name {
+  color: var(--color-green, #4ade80);
+  font-weight: 600;
+}
+
+.branch-row-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--color-green, #4ade80);
+}
+
+.branch-row-icon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.branch-row.current .branch-row-icon {
+  color: var(--color-green, #4ade80);
+  opacity: 1;
+}
+
+.branch-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.branch-row-upstream {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.branch-row-ahead {
+  font-size: 10px;
+  color: #4ade80;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.branch-row-behind {
+  font-size: 10px;
+  color: #60a5fa;
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.branch-row-time {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding-left: 8px;
+}
+
+/* ── 提交历史区 ── */
+.branch-commits {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.branch-commits-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.branch-commits-title {
+  color: var(--text-secondary);
+}
+
+.branch-commits-branch {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--color-orange, #fab387);
+  text-transform: none;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.branch-commits-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0 8px;
+  min-height: 0;
+}
+
+.branch-commit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: default;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+
+.branch-commit-row:hover {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.08));
+  border-left-color: var(--color-orange, #fab387);
+}
+
+.branch-commit-sha {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-yellow, #facc15);
+  padding: 1px 4px;
+  background: rgba(250, 204, 21, 0.1);
+  border-radius: 3px;
+  flex-shrink: 0;
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.branch-commit-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.branch-commit-summary {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.branch-commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.branch-commit-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+  opacity: 0.85;
+}
+
+.branch-commit-time {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.branch-commit-sep {
+  opacity: 0.35;
+  flex-shrink: 0;
+}
+
+.branch-commit-merge {
+  font-size: 9px;
+  color: var(--color-purple, #c084fc);
+  padding: 0 4px;
+  background: rgba(192, 132, 252, 0.13);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.branch-commits-more {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 6px 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.branch-commits-more:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.08));
+}
+
+.branch-commits-more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   提交悬浮信息卡（commit-tooltip）— 代替浏览器原生 title
+   ═════════════════════════════════════════════════════════════════ */
+.commit-tooltip {
+  background: var(--bg-sidebar, #1e1e2e);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+  min-width: 320px;
+  max-width: 460px;
+  color: var(--text-primary);
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: commitTooltipFadeIn 0.15s ease-out;
+  pointer-events: auto;
+}
+
+@keyframes commitTooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-100%, -50%) translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-100%, -50%);
+  }
+}
+
+.commit-tooltip-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+
+.commit-tooltip-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(250, 179, 135, 0.18);
+  color: var(--color-orange, #fab387);
+  flex-shrink: 0;
+}
+
+.commit-tooltip-author {
+  color: var(--color-orange, #fab387);
+  font-weight: 600;
+  font-family: var(--font-sans);
+}
+
+.commit-tooltip-dot {
+  opacity: 0.4;
+  margin: 0 1px;
+}
+
+.commit-tooltip-relative {
+  color: var(--text-primary);
+  opacity: 0.9;
+}
+
+.commit-tooltip-absolute {
+  opacity: 0.6;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.commit-tooltip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.45;
+  word-break: break-word;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.commit-tooltip-body {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.65;
+  word-break: break-word;
+  padding-left: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.commit-tooltip-body-para {
+  margin-bottom: 4px;
+  opacity: 0.92;
+}
+
+.commit-tooltip-body-para:last-child {
+  margin-bottom: 0;
+}
+
+.commit-tooltip-stats {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-color);
+  line-height: 1.6;
+}
+
+.commit-tooltip-stats b {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.commit-tooltip-plus {
+  color: #4ade80;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.commit-tooltip-minus {
+  color: #f87171;
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.commit-tooltip-stats-loading,
+.commit-tooltip-stats-empty {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.commit-tooltip-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.commit-tooltip-sha {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-yellow, #facc15);
+  padding: 3px 8px;
+  background: rgba(250, 204, 21, 0.12);
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: default;
+}
+
+.commit-tooltip-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.commit-tooltip-copy:hover {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.1));
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.commit-tooltip-copy:active {
+  transform: translateY(1px);
+}
+
+.commit-tooltip-merge-tag {
+  font-size: 10px;
+  color: var(--color-purple, #c084fc);
+  background: rgba(192, 132, 252, 0.13);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  margin-left: auto;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+

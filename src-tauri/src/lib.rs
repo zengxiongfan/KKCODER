@@ -4311,7 +4311,11 @@ pub fn run() {
             commands::git::git_rebase_continue,
             commands::git::git_list_repositories,
             commands::git::git_watch_start,
-            commands::git::git_watch_stop
+            commands::git::git_watch_stop,
+            commands::git::git_list_branches,
+            commands::git::git_list_branch_commits,
+            commands::git::git_checkout_branch,
+            commands::git::git_commit_stat
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

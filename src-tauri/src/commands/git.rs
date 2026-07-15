@@ -53,6 +53,63 @@ pub struct SelectedLine {
     pub line_number: u32,
 }
 
+/// 分支列表项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchItem {
+    /// 短名（例如 "main"、"origin/main"）
+    pub name: String,
+    /// 完整引用（例如 "refs/heads/main"、"refs/remotes/origin/main"）
+    pub full_ref: String,
+    /// 是否为远程分支
+    pub is_remote: bool,
+    /// 是否为当前 HEAD 指向的分支
+    pub is_current: bool,
+    /// 本地分支上游（如 "origin/main"）；远程分支为 None
+    pub upstream: Option<String>,
+    /// 相对上游的 ahead / behind（仅本地分支且存在上游时）
+    pub ahead: usize,
+    pub behind: usize,
+    /// 最新一次提交的简要信息
+    pub last_commit: Option<GitCommitBrief>,
+}
+
+/// 提交简要信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitBrief {
+    pub sha: String,
+    pub short_sha: String,
+    pub summary: String,
+    pub author: String,
+    pub email: String,
+    /// Unix 秒（UTC）
+    pub timestamp: i64,
+}
+
+/// 提交历史项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitEntry {
+    pub sha: String,
+    pub short_sha: String,
+    pub summary: String,
+    pub body: String,
+    pub author: String,
+    pub email: String,
+    pub timestamp: i64,
+    pub parents: Vec<String>,
+}
+
+/// 单个提交的 diff 统计
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitStat {
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+}
+
 // ─────────────────────────── 辅助函数 ───────────────────────────
 
 fn open_git_repo<P: AsRef<Path>>(path: P) -> Result<Repository, String> {
@@ -1245,4 +1302,278 @@ pub async fn git_watch_start(
 #[tauri::command]
 pub async fn git_watch_stop(bridge: State<'_, GitWatcherBridge>) -> Result<(), String> {
     bridge.stop()
+}
+
+// ────────────────────────── 分支列表与提交历史 ──────────────────────────
+
+/// 将 git2::Commit 转为 GitCommitBrief
+fn commit_to_brief(commit: &git2::Commit<'_>) -> GitCommitBrief {
+    let sha = commit.id().to_string();
+    let short_sha = sha.chars().take(7).collect::<String>();
+    let summary = commit.summary().unwrap_or("").to_string();
+    let author = commit.author();
+    GitCommitBrief {
+        sha,
+        short_sha,
+        summary,
+        author: author.name().unwrap_or("").to_string(),
+        email: author.email().unwrap_or("").to_string(),
+        timestamp: commit.time().seconds(),
+    }
+}
+
+/// 列出仓库所有本地与远程分支
+#[tauri::command]
+pub async fn git_list_branches(project_path: String) -> Result<Vec<GitBranchItem>, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+
+        // 当前 HEAD 指向的本地分支名（detached 时为 None）
+        let current_branch = if repo.head_detached().unwrap_or(false) {
+            None
+        } else {
+            repo.head().ok().and_then(|h| h.shorthand().map(|s| s.to_string()))
+        };
+
+        let mut items: Vec<GitBranchItem> = Vec::new();
+
+        let branches_iter = repo
+            .branches(None)
+            .map_err(|e| format!("list_branches_failed: {e}"))?;
+
+        for br in branches_iter.flatten() {
+            let (branch, bt) = br;
+            let is_remote = matches!(bt, git2::BranchType::Remote);
+
+            // 短名（例如 "main" 或 "origin/main"）
+            let name = match branch.name() {
+                Ok(Some(n)) => n.to_string(),
+                _ => continue,
+            };
+
+            // 跳过 origin/HEAD 伪引用
+            if is_remote && name.ends_with("/HEAD") {
+                continue;
+            }
+
+            let reference = branch.get();
+            let full_ref = reference.name().unwrap_or("").to_string();
+
+            let is_current = !is_remote
+                && current_branch.as_deref() == Some(name.as_str());
+
+            // 上游与 ahead/behind
+            let mut upstream: Option<String> = None;
+            let mut ahead = 0usize;
+            let mut behind = 0usize;
+            if !is_remote {
+                if let Ok(up) = branch.upstream() {
+                    if let Ok(Some(up_name)) = up.name() {
+                        upstream = Some(up_name.to_string());
+                    }
+                    if let (Some(local_oid), Some(up_oid)) =
+                        (reference.target(), up.get().target())
+                    {
+                        if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, up_oid) {
+                            ahead = a;
+                            behind = b;
+                        }
+                    }
+                }
+            }
+
+            // 最新提交
+            let last_commit = reference
+                .peel_to_commit()
+                .ok()
+                .map(|c| commit_to_brief(&c));
+
+            items.push(GitBranchItem {
+                name,
+                full_ref,
+                is_remote,
+                is_current,
+                upstream,
+                ahead,
+                behind,
+                last_commit,
+            });
+        }
+
+        // 排序：本地在前，当前分支置顶；其余按最新提交时间倒序
+        items.sort_by(|a, b| {
+            match (a.is_remote, b.is_remote) {
+                (false, true) => std::cmp::Ordering::Less,
+                (true, false) => std::cmp::Ordering::Greater,
+                _ => {
+                    if a.is_current != b.is_current {
+                        return if a.is_current {
+                            std::cmp::Ordering::Less
+                        } else {
+                            std::cmp::Ordering::Greater
+                        };
+                    }
+                    let ta = a.last_commit.as_ref().map(|c| c.timestamp).unwrap_or(0);
+                    let tb = b.last_commit.as_ref().map(|c| c.timestamp).unwrap_or(0);
+                    tb.cmp(&ta)
+                }
+            }
+        });
+
+        Ok(items)
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 获取指定分支（或引用）的提交历史
+///
+/// - `branch_ref`：完整引用（如 "refs/heads/main"、"refs/remotes/origin/main"）或短名
+/// - `limit`：每次获取的最大数量（默认 100，上限 500）
+/// - `skip`：跳过前 N 个提交（分页用，默认 0）
+#[tauri::command]
+pub async fn git_list_branch_commits(
+    project_path: String,
+    branch_ref: String,
+    limit: Option<u32>,
+    skip: Option<u32>,
+) -> Result<Vec<GitCommitEntry>, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+
+        // 解析引用→commit oid
+        let obj = repo
+            .revparse_single(&branch_ref)
+            .map_err(|e| format!("revparse_failed: {e}"))?;
+        let start_oid = obj
+            .peel_to_commit()
+            .map_err(|e| format!("peel_commit_failed: {e}"))?
+            .id();
+
+        let mut revwalk = repo
+            .revwalk()
+            .map_err(|e| format!("revwalk_failed: {e}"))?;
+        revwalk
+            .push(start_oid)
+            .map_err(|e| format!("revwalk_push_failed: {e}"))?;
+        revwalk
+            .set_sorting(git2::Sort::TIME)
+            .map_err(|e| format!("revwalk_sort_failed: {e}"))?;
+
+        let cap = limit.unwrap_or(100).min(500) as usize;
+        let skip_n = skip.unwrap_or(0) as usize;
+        let mut out: Vec<GitCommitEntry> = Vec::with_capacity(cap);
+
+        for (idx, oid_res) in revwalk.enumerate() {
+            if idx < skip_n {
+                continue;
+            }
+            if out.len() >= cap {
+                break;
+            }
+            let oid = match oid_res {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
+            let commit = match repo.find_commit(oid) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let sha = commit.id().to_string();
+            let short_sha = sha.chars().take(7).collect::<String>();
+            let summary = commit.summary().unwrap_or("").to_string();
+            let body = commit.body().unwrap_or("").to_string();
+            let author = commit.author();
+            let parents: Vec<String> = commit.parent_ids().map(|p| p.to_string()).collect();
+            out.push(GitCommitEntry {
+                sha,
+                short_sha,
+                summary,
+                body,
+                author: author.name().unwrap_or("").to_string(),
+                email: author.email().unwrap_or("").to_string(),
+                timestamp: commit.time().seconds(),
+                parents,
+            });
+        }
+
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 获取单个提交的 diff 统计（与父提交对比；首提交与空树对比）
+#[tauri::command]
+pub async fn git_commit_stat(project_path: String, sha: String) -> Result<GitCommitStat, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+        let oid = git2::Oid::from_str(&sha).map_err(|_| "invalid_sha".to_string())?;
+        let commit = repo.find_commit(oid).map_err(|e| format!("find_commit_failed: {e}"))?;
+
+        let commit_tree = commit.tree().map_err(|e| format!("tree_failed: {e}"))?;
+        let parent_tree = if commit.parent_count() > 0 {
+            let parent = commit.parent(0).map_err(|e| format!("parent_failed: {e}"))?;
+            Some(parent.tree().map_err(|e| format!("parent_tree_failed: {e}"))?)
+        } else {
+            None
+        };
+
+        let mut opts = DiffOptions::new();
+        let diff = repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut opts))
+            .map_err(|e| format!("diff_failed: {e}"))?;
+
+        let stats = diff.stats().map_err(|e| format!("stats_failed: {e}"))?;
+        Ok(GitCommitStat {
+            files_changed: stats.files_changed(),
+            insertions: stats.insertions(),
+            deletions: stats.deletions(),
+        })
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 切换到指定分支（避开工作区写入潜在风险，直接 shell out git）
+///
+/// - 本地分支：`git checkout <name>`
+/// - 远程分支：`git checkout --track <origin/branch>`（自动创建同名本地分支）
+#[tauri::command]
+pub async fn git_checkout_branch(
+    project_path: String,
+    branch: String,
+    is_remote: bool,
+) -> Result<String, String> {
+    validate_branch_name(&branch)?;
+    tokio::task::spawn_blocking(move || {
+        if is_remote {
+            // 推导本地名：去掉前缀 "remote/"
+            let local_name = branch
+                .split_once('/')
+                .map(|(_, rest)| rest)
+                .unwrap_or(&branch);
+            // 若同名本地分支已存在 → 直接切换；否则创建跟踪分支
+            match run_git_cli(&project_path, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{local_name}")]) {
+                Ok(_) => run_git_cli(&project_path, &["checkout", local_name]),
+                Err(_) => run_git_cli(&project_path, &["checkout", "--track", &branch]),
+            }
+        } else {
+            run_git_cli(&project_path, &["checkout", &branch])
+        }
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
 }
