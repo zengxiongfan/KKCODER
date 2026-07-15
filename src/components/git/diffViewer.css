@@ -1,0 +1,209 @@
+/* Diff 视图容器：提供 react-diff-view 所需的主题变量与 token 语法高亮色。
+   --git-diff-* 由 Diff 组件内部 class（diff-code-insert / diff-code-delete 等）消费。 */
+
+/* 默认（无前缀 data-theme）主题变量 —— 对应 dark-blue / dark 类深色背景 */
+.diff-viewer-container {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+
+  /* 背景与边框 */
+  --git-diff-bg: rgba(0, 0, 0, 0.25);
+  --git-diff-gutter-bg: rgba(0, 0, 0, 0.18);
+  --git-diff-border: var(--border-color);
+
+  /* 文本 */
+  --git-diff-text: var(--text-primary);
+  --git-diff-muted: var(--text-secondary);
+
+  /* Hunk 头 */
+  --git-diff-hunk-bg: rgba(148, 163, 184, 0.10);
+  --git-diff-hunk-text: #5ac8e0;
+
+  /* 新增行（绿） */
+  --git-diff-insert-bg: rgba(34, 197, 94, 0.12);
+  --git-diff-insert-gutter-bg: rgba(34, 197, 94, 0.20);
+  --git-diff-insert-decoration: rgba(34, 197, 94, 0.35);
+
+  /* 删除行（红） */
+  --git-diff-delete-bg: rgba(239, 68, 68, 0.12);
+  --git-diff-delete-gutter-bg: rgba(239, 68, 68, 0.20);
+  --git-diff-delete-decoration: rgba(239, 68, 68, 0.35);
+
+  /* 语法 token */
+  --git-token-comment: #6a6a6a;
+  --git-token-punctuation: #9aa0a6;
+  --git-token-keyword: #c792ea;
+  --git-token-function: #82aaff;
+  --git-token-property: #ffcb6b;
+  --git-token-deleted: #f07178;
+  --git-token-string: #c3e88d;
+  --git-token-number: #f78c6c;
+  --git-token-operator: #89ddff;
+  --git-token-regex: #f78c6c;
+}
+
+/* 浅色主题变量 —— 适配 KKCoder 各 light-* 主题 */
+[data-theme^="light-"] .diff-viewer-container {
+  --git-diff-bg: rgba(0, 0, 0, 0.03);
+  --git-diff-gutter-bg: rgba(0, 0, 0, 0.05);
+  --git-diff-text: var(--text-primary);
+  --git-diff-muted: var(--text-secondary);
+  --git-diff-hunk-bg: rgba(148, 163, 184, 0.12);
+  --git-diff-hunk-text: #0e7490;
+
+  --git-diff-insert-bg: rgba(22, 163, 74, 0.10);
+  --git-diff-insert-gutter-bg: rgba(22, 163, 74, 0.16);
+  --git-diff-insert-decoration: rgba(22, 163, 74, 0.25);
+
+  --git-diff-delete-bg: rgba(220, 38, 38, 0.10);
+  --git-diff-delete-gutter-bg: rgba(220, 38, 38, 0.16);
+  --git-diff-delete-decoration: rgba(220, 38, 38, 0.25);
+
+  --git-token-comment: #6b7280;
+  --git-token-punctuation: #475569;
+  --git-token-keyword: #7c3aed;
+  --git-token-function: #1d4ed8;
+  --git-token-property: #b45309;
+  --git-token-deleted: #be123c;
+  --git-token-string: #15803d;
+  --git-token-number: #c2410c;
+  --git-token-operator: #0369a1;
+  --git-token-regex: #c2410c;
+}
+
+/* ── react-diff-view ── */
+
+.diff-viewer-container .diff {
+  border: none;
+  background-color: var(--git-diff-bg);
+  color: var(--git-diff-text);
+}
+
+.diff-viewer-container .diff-gutter {
+  min-width: 50px;
+  user-select: none;
+  background-color: var(--git-diff-gutter-bg);
+  color: var(--git-diff-muted);
+}
+
+.diff-viewer-container .diff-gutter-insert {
+  background-color: var(--git-diff-insert-gutter-bg);
+}
+
+.diff-viewer-container .diff-gutter-delete {
+  background-color: var(--git-diff-delete-gutter-bg);
+}
+
+.diff-viewer-container .diff-code {
+  background-color: var(--git-diff-bg);
+  color: var(--git-diff-text);
+}
+
+.diff-viewer-container .diff-code-insert {
+  background-color: var(--git-diff-insert-bg);
+}
+
+.diff-viewer-container .diff-code-delete {
+  background-color: var(--git-diff-delete-bg);
+}
+
+.diff-viewer-container .diff-hunk-header {
+  padding: 4px 8px;
+  font-weight: 600;
+  background-color: var(--git-diff-hunk-bg);
+  color: var(--git-diff-hunk-text);
+}
+
+/* 行侧装饰色条（insert/delete 左侧竖条） */
+.diff-viewer-container .diff-code-insert .diff-code-decoration {
+  background-color: var(--git-diff-insert-decoration);
+}
+
+.diff-viewer-container .diff-code-delete .diff-code-decoration {
+  background-color: var(--git-diff-delete-decoration);
+}
+
+/* 分栏时左右面板之间的分隔线 */
+.diff-viewer-container .diff-split {
+  border-left: 1px solid var(--git-diff-border);
+}
+
+/* 选中行（点 gutter 选中后可回滚）高亮 */
+.diff-viewer-container .diff-code-selected {
+  outline: 1px solid rgba(90, 200, 224, 0.35);
+}
+
+/* ── refractor 语法 token ── */
+
+.diff-viewer-container .token.comment,
+.diff-viewer-container .token.prolog,
+.diff-viewer-container .token.doctype,
+.diff-viewer-container .token.cdata {
+  color: var(--git-token-comment);
+  font-style: italic;
+}
+
+.diff-viewer-container .token.punctuation {
+  color: var(--git-token-punctuation);
+}
+
+.diff-viewer-container .token.keyword,
+.diff-viewer-container .token.atrule,
+.diff-viewer-container .token.rule {
+  color: var(--git-token-keyword);
+}
+
+.diff-viewer-container .token.function,
+.diff-viewer-container .token.function-variable {
+  color: var(--git-token-function);
+}
+
+.diff-viewer-container .token.class-name,
+.diff-viewer-container .token.property,
+.diff-viewer-container .token.attr-name,
+.diff-viewer-container .token.builtin {
+  color: var(--git-token-property);
+}
+
+.diff-viewer-container .token.tag,
+.diff-viewer-container .token.selector,
+.diff-viewer-container .token.deleted {
+  color: var(--git-token-deleted);
+}
+
+.diff-viewer-container .token.string,
+.diff-viewer-container .token.char,
+.diff-viewer-container .token.attr-value,
+.diff-viewer-container .token.inserted {
+  color: var(--git-token-string);
+}
+
+.diff-viewer-container .token.number,
+.diff-viewer-container .token.boolean,
+.diff-viewer-container .token.constant,
+.diff-viewer-container .token.symbol {
+  color: var(--git-token-number);
+}
+
+.diff-viewer-container .token.operator,
+.diff-viewer-container .token.entity,
+.diff-viewer-container .token.url,
+.diff-viewer-container .token.variable {
+  color: var(--git-token-operator);
+}
+
+.diff-viewer-container .token.regex,
+.diff-viewer-container .token.important {
+  color: var(--git-token-regex);
+}
+
+.diff-viewer-container .token.important,
+.diff-viewer-container .token.bold {
+  font-weight: 600;
+}
+
+.diff-viewer-container .token.italic {
+  font-style: italic;
+}

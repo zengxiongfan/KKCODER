@@ -1,5 +1,8 @@
 // Git diff 语法高亮：为 react-diff-view 的 tokenize 提供 refractor(Prism) 实例与语言探测。
-import * as refractor from "refractor/core";
+//
+// react-diff-view@3 的 tokenize 期望 refractor v2/v3 语义（highlight 返回节点数组）。
+// 配合 @types/refractor@3，import * as refractor 得到挂载了 highlight/register 的实例。
+import refractor from "refractor/core";
 import markup from "refractor/lang/markup";
 import clike from "refractor/lang/clike";
 import css from "refractor/lang/css";
@@ -21,17 +24,18 @@ import c from "refractor/lang/c";
 import cpp from "refractor/lang/cpp";
 import scss from "refractor/lang/scss";
 import ruby from "refractor/lang/ruby";
+import diff from "refractor/lang/diff";
 
 // 注册顺序须满足依赖：base 先于派生
 const LANGUAGES = [
   markup, clike, css,
   javascript, jsx, typescript, tsx,
   json, bash, rust, python, yaml, toml, markdown, sql, go, java,
-  c, cpp, scss, ruby,
+  c, cpp, scss, ruby, diff,
 ];
 
 for (const lang of LANGUAGES) {
-  (refractor as unknown as { register: (lang: unknown) => void }).register(lang);
+  refractor.register(lang as never);
 }
 
 // 文件扩展名 → refractor 语言名
@@ -56,6 +60,7 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   c: "c", h: "c",
   cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", hxx: "cpp",
   rb: "ruby",
+  diff: "diff", patch: "diff",
 };
 
 export function detectLanguage(fileName: string): string | null {

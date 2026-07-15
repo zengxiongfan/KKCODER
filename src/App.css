@@ -5360,14 +5360,20 @@ input:checked + .switch-slider:before {
   color: #f87171;
 }
 
-/* react-diff-view 样式适配 */
-.diff-decoration {
+/* react-diff-view Hunk 头：td 占满整行，内部 flex 行左右排布 */
+.diff-decoration-cell {
+  padding: 0 !important;
+  background: rgba(148, 163, 184, 0.06);
+  border-bottom: 1px solid var(--border-color);
+}
+.diff-decoration-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 4px 12px;
-  background: rgba(148, 163, 184, 0.06);
-  border-bottom: 1px solid var(--border-color);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .diff-hunk-content {
@@ -5403,118 +5409,70 @@ input:checked + .switch-slider:before {
   cursor: default;
 }
 
-/* Diff 分栏视图 */
-.diff-viewer-container {
+/* ── Diff 回退（纯文本）样式 ── */
+.diff-content {
+  margin: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
 }
 
-.diff-split-container {
+.diff-content .diff-line { display: flex; }
+
+/* fallback hunk 头 */
+.diff-content .diff-hunk {
+  background: rgba(148, 163, 184, 0.10);
+  color: #5ac8e0;
+}
+
+/* fallback：新增行（绿） */
+.diff-content .diff-line-add {
+  background: rgba(34, 197, 94, 0.10);
+  color: #4ade80;
+}
+
+/* fallback：删除行（红） */
+.diff-content .diff-line-del {
+  background: rgba(239, 68, 68, 0.10);
+  color: #f87171;
+}
+
+/* ── Diff 行级回滚操作条 ── */
+.diff-revert-bar {
   display: flex;
-  width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-sidebar);
   border-top: 1px solid var(--border-color);
 }
 
-.diff-split-panel {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-}
-
-.diff-split-old {
-  border-right: 1px solid var(--border-color);
-}
-
-.diff-split-header {
-  padding: 4px 12px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-secondary);
-  background: rgba(148, 163, 184, 0.06);
-  border-bottom: 1px solid var(--border-color);
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
-
-.diff-split-old .diff-split-header {
-  color: #f87171;
-}
-
-.diff-split-new .diff-split-header {
-  color: #4ade80;
-}
-
-.diff-split-lines {
-  padding: 0;
-}
-
-.diff-line {
-  display: flex;
-  min-height: 20px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.diff-line:hover {
-  background: rgba(148, 163, 184, 0.06);
-}
-
-.diff-line-empty {
-  background: rgba(148, 163, 184, 0.03);
-  min-height: 20px;
-}
-
-.diff-line-num {
-  width: 44px;
-  min-width: 44px;
-  padding: 0 8px;
-  text-align: right;
-  color: var(--text-secondary);
-  opacity: 0.5;
-  user-select: none;
-  border-right: 1px solid var(--border-color);
+.diff-revert-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
   font-size: 11px;
-  flex-shrink: 0;
-}
-
-.diff-line-content {
-  padding: 0 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
   color: var(--text-primary);
-  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-/* 新增行（绿色背景） */
-.diff-line-add {
-  background: rgba(34, 197, 94, 0.08);
+.diff-revert-bar-btn:hover {
+  background: rgba(148, 163, 184, 0.1);
 }
 
-.diff-line-add .diff-line-num {
-  background: rgba(34, 197, 94, 0.12);
-  color: #4ade80;
-  font-weight: 600;
-  opacity: 1;
-}
-
-/* 删除行（红色背景） */
-.diff-line-del {
-  background: rgba(239, 68, 68, 0.08);
-}
-
-.diff-line-del .diff-line-num {
-  background: rgba(239, 68, 68, 0.12);
+.diff-revert-bar-btn.danger {
   color: #f87171;
-  font-weight: 600;
-  opacity: 1;
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
-.diff-line-del .diff-line-content {
-  opacity: 0.7;
-  text-decoration: line-through;
+.diff-revert-bar-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.1);
 }
 

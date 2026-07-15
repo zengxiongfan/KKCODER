@@ -1,14 +1,26 @@
 /**
- * DiffViewerModal — 文件 diff 查看器（完整版）
+ * DiffViewerModal — 文件 diff 查看器
  * 分栏视图 + 语法高亮 + Hunk 级回滚 + 行级回滚
+ *
+ * 基于 react-diff-view 的 <Diff>/<Hunk>/<Decoration> 组件渲染，
+ * 并通过 tokenize() + refractor 对 diff 行内代码做语法高亮。
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { X, RotateCcw } from "lucide-react";
-import { parseDiff } from "react-diff-view";
-import type { Hunk, Change } from "gitdiff-parser";
+import {
+  parseDiff,
+  Diff,
+  Hunk,
+  Decoration,
+  tokenize,
+  getChangeKey,
+} from "react-diff-view";
+import type { ChangeData } from "react-diff-view";
+import { refractor, detectLanguage } from "./diffHighlight";
 import "react-diff-view/style/index.css";
+import "./diffViewer.css";
 
 interface DiffViewerModalProps {
   projectPath: string;
@@ -25,12 +37,14 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
   onClose,
   onRequestDiscard,
 }) => {
-  const [diffText, setDiffText] = useState<string | null>(null);
+  const [diffText, setDiffText] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
   const fileName = filePath.split(/[\\/]/).pop() || filePath;
 
+  // ── 拉取 diff 文本 ──
   useEffect(() => {
     let cancelled = false;
 
@@ -63,7 +77,12 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
     };
   }, [projectPath, filePath, status]);
 
-  // ESC 关闭
+  // ── 切换文件时清空行选择 ──
+  useEffect(() => {
+    setSelectedKeys([]);
+  }, [diffText]);
+
+  // ── ESC 关闭 ──
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -74,18 +93,87 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  // 解析 diff（返回 File 数组，取第一个文件）
-  const parsedFile = React.useMemo(() => {
+  // ── 解析 diff + 语法高亮 tokenize ──
+  const parsed = useMemo(() => {
     if (!diffText) return null;
     try {
       const files = parseDiff(diffText);
-      return files[0] ?? null;
-    } catch {
-      return null;
+      if (files.length > 0) {
+        const file = files[0];
+        // 按文件扩展名启用语法高亮；失败时回退为无高亮 token
+        const language = detectLanguage(fileName);
+        if (language) {
+          try {
+            return {
+              file,
+              tokens: tokenize(file.hunks, { highlight: true, refractor, language }),
+            };
+          } catch (highlightErr) {
+            console.warn("[DiffViewer] 语法高亮失败，回退无高亮:", highlightErr);
+          }
+        }
+        return { file, tokens: tokenize(file.hunks) };
+      }
+    } catch (err) {
+      console.error("[DiffViewer] 解析 diff 失败:", err);
     }
-  }, [diffText]);
+    return null;
+  }, [diffText, fileName]);
 
-  // 纯文本 fallback 渲染
+  const parsedFile = parsed?.file ?? null;
+  const tokens = parsed?.tokens ?? null;
+
+  // ── 仅未跟踪文件不可回滚 ──
+  const canDiscard = status !== "U" && status !== "??";
+
+  // ── 切换单个变更行选中（仅 insert/delete 可选） ──
+  const toggleSelect = useCallback(({ change }: { change: ChangeData | null }) => {
+    if (!change || change.type === "normal") return;
+    const key = getChangeKey(change);
+    setSelectedKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  }, []);
+
+  // ── Hunk 级回滚 ──
+  const handleRevertHunk = async (hunkIndex: number) => {
+    if (!diffText) return;
+    try {
+      await invoke("git_revert_hunk", { projectPath, diffText, hunkIndex });
+      onClose();
+    } catch {
+      setError("回滚 Hunk 失败，请刷新后重试");
+    }
+  };
+
+  // ── 收集选中行（行级回滚用） ──
+  const collectSelectedLines = (): { side: "old" | "new"; lineNumber: number }[] => {
+    const result: { side: "old" | "new"; lineNumber: number }[] = [];
+    if (!parsedFile) return result;
+    for (const hunk of parsedFile.hunks) {
+      for (const change of hunk.changes) {
+        if (change.type === "normal") continue;
+        if (!selectedKeys.includes(getChangeKey(change))) continue;
+        if (change.type === "insert") result.push({ side: "new", lineNumber: change.lineNumber });
+        else result.push({ side: "old", lineNumber: change.lineNumber });
+      }
+    }
+    return result;
+  };
+
+  // ── 行级回滚 ──
+  const handleRevertLines = async () => {
+    const selectedLines = collectSelectedLines();
+    if (selectedLines.length === 0) return;
+    try {
+      await invoke("git_revert_lines", { projectPath, diffText, selectedLines });
+      onClose();
+    } catch {
+      setError("回滚选中行失败，请刷新后重试");
+    }
+  };
+
+  // ── 纯文本 fallback（diff 无法解析时） ──
   const renderFallbackDiff = () => {
     if (!diffText) return null;
     return (
@@ -93,9 +181,9 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
         {diffText.split("\n").map((line, idx) => {
           let className = "diff-line";
           if (line.startsWith("+") && !line.startsWith("+++")) {
-            className += " diff-add";
+            className += " diff-line-add";
           } else if (line.startsWith("-") && !line.startsWith("---")) {
-            className += " diff-del";
+            className += " diff-line-del";
           } else if (line.startsWith("@@")) {
             className += " diff-hunk";
           }
@@ -108,19 +196,6 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
       </pre>
     );
   };
-
-  // Hunk 级回滚
-  const handleRevertHunk = async (hunkIndex: number) => {
-    if (!diffText) return;
-    try {
-      await invoke("git_revert_hunk", { projectPath, diffText, hunkIndex });
-      onClose();
-    } catch {
-      setError("回滚 Hunk 失败，请刷新后重试");
-    }
-  };
-
-  const canDiscard = status !== "D";
 
   return (
     <div className="diff-modal-overlay" onClick={onClose}>
@@ -154,87 +229,39 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
             <div className="diff-loading">加载 diff...</div>
           ) : error ? (
             <div className="diff-error">{error}</div>
-          ) : parsedFile ? (
-            // 分栏视图：左侧显示原始内容，右侧显示修改后内容
+          ) : diffText && parsedFile && tokens ? (
             <div className="diff-viewer-container">
-              {parsedFile.hunks.map((hunk: Hunk, index: number) => (
-                <div key={index}>
-                  {/* Hunk header with revert button */}
-                  <div className="diff-decoration">
-                    <span className="diff-hunk-content">{hunk.content}</span>
-                    {canDiscard && (
-                      <button
-                        onClick={() => handleRevertHunk(index)}
-                        className="diff-revert-hunk-btn"
-                        title="回滚此 Hunk"
-                      >
-                        <RotateCcw size={11} />
-                        回滚 Hunk
-                      </button>
-                    )}
-                  </div>
-                  {/* 分栏 Diff：左边(old) | 右边(new) */}
-                  <div className="diff-split-container">
-                    {/* 左侧：原始内容 */}
-                    <div className="diff-split-panel diff-split-old">
-                      <div className="diff-split-header">原始</div>
-                      <div className="diff-split-lines">
-                        {hunk.changes.map((change: Change, changeIdx: number) => {
-                          const isInsert = change.type === "insert";
-                          // insert 行在左侧不显示（新增的行没有原始内容）
-                          if (isInsert) {
-                            return (
-                              <div key={changeIdx} className="diff-line diff-line-empty">
-                                <span className="diff-line-num"></span>
-                                <span className="diff-line-content"></span>
-                              </div>
-                            );
-                          }
-                          const isDelete = change.type === "delete";
-                          const isNormal = change.type === "normal";
-                          const lineNum = isNormal ? change.oldLineNumber : change.lineNumber;
-                          const lineClass = isDelete ? "diff-line-del" : "diff-line-normal";
-
-                          return (
-                            <div key={changeIdx} className={`diff-line ${lineClass}`}>
-                              <span className="diff-line-num">{lineNum}</span>
-                              <span className="diff-line-content">{change.content}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {/* 右侧：修改后内容 */}
-                    <div className="diff-split-panel diff-split-new">
-                      <div className="diff-split-header">修改后</div>
-                      <div className="diff-split-lines">
-                        {hunk.changes.map((change: Change, changeIdx: number) => {
-                          const isDelete = change.type === "delete";
-                          // delete 行在右侧不显示（已删除的行没有新内容）
-                          if (isDelete) {
-                            return (
-                              <div key={changeIdx} className="diff-line diff-line-empty">
-                                <span className="diff-line-num"></span>
-                                <span className="diff-line-content"></span>
-                              </div>
-                            );
-                          }
-                          const isInsert = change.type === "insert";
-                          const lineNum = isInsert ? change.lineNumber : change.newLineNumber;
-                          const lineClass = isInsert ? "diff-line-add" : "diff-line-normal";
-
-                          return (
-                            <div key={changeIdx} className={`diff-line ${lineClass}`}>
-                              <span className="diff-line-num">{lineNum}</span>
-                              <span className="diff-line-content">{change.content}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              <Diff
+                viewType="split"
+                diffType={parsedFile.type}
+                hunks={parsedFile.hunks}
+                tokens={tokens}
+                selectedChanges={selectedKeys}
+                gutterEvents={canDiscard ? { onClick: toggleSelect } : undefined}
+              >
+                {(hunks: ReturnType<typeof parseDiff>[number]["hunks"]) =>
+                  hunks.map((hunk, index) => (
+                    <React.Fragment key={hunk.content}>
+                      <Decoration contentClassName="diff-decoration-cell">
+                        <div className="diff-decoration-row">
+                          <span className="diff-hunk-content">{hunk.content}</span>
+                          {canDiscard && (
+                            <button
+                              onClick={() => handleRevertHunk(index)}
+                              className="diff-revert-hunk-btn"
+                              title="回滚此 Hunk"
+                            >
+                              <RotateCcw size={11} />
+                              回滚 Hunk
+                            </button>
+                          )}
+                        </div>
+                      </Decoration>
+                      <Hunk hunk={hunk} />
+                    </React.Fragment>
+                  ))
+                }
+              </Diff>
             </div>
           ) : diffText ? (
             renderFallbackDiff()
@@ -242,6 +269,28 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
             <div className="diff-empty">无变更或无法解析 diff</div>
           )}
         </div>
+
+        {/* 行级回滚操作条 */}
+        {canDiscard && parsedFile && selectedKeys.length > 0 && (
+          <div className="diff-revert-bar">
+            <span>已选 {selectedKeys.length} 行</span>
+            <button
+              onClick={() => setSelectedKeys([])}
+              className="diff-revert-bar-btn"
+              title="取消选中"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleRevertLines}
+              className="diff-revert-bar-btn danger"
+              title="回滚选中的行"
+            >
+              <RotateCcw size={11} />
+              回滚选中行
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
