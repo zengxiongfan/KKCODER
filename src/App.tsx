@@ -672,6 +672,14 @@ function App() {
     };
   }, [showProjectTree, activeSession?.path]);
 
+  // 将相对路径转为绝对路径（路径分隔符自适应，projectPath 为空时回退为原样返回）
+  const toAbsolutePath = useCallback((relativePath: string): string => {
+    const base = activeSession?.path;
+    if (!base) return relativePath;
+    const sep = base.endsWith("/") || base.endsWith("\\") ? "" : "/";
+    return `${base}${sep}${relativePath}`;
+  }, [activeSession?.path]);
+
   const insertConversationTagToActiveTerminal = useCallback((text: string) => {
     if (!activeSessionId || !text) return;
     window.dispatchEvent(new CustomEvent("kkcoder-insert-conversation-tag", {
@@ -965,9 +973,10 @@ function App() {
   }, [activeSession?.path]);
 
   const handleInsertPathToTerminal = useCallback((relativePath: string) => {
-    const formatted = `"${relativePath}" `;
+    const absolutePath = toAbsolutePath(relativePath);
+    const formatted = `"${absolutePath}" `;
     insertConversationTagToActiveTerminal(formatted);
-  }, [insertConversationTagToActiveTerminal]);
+  }, [insertConversationTagToActiveTerminal, toAbsolutePath]);
 
 
   // 处理文件内查找内容改变（更新匹配的行号列表和当前匹配项索引）
@@ -2937,16 +2946,17 @@ function App() {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button 
+            <button
               onClick={() => {
                 const isSingleLine = previewContextMenu.startLine === previewContextMenu.endLine;
-                const rangeStr = isSingleLine 
-                  ? `L${previewContextMenu.startLine}` 
+                const rangeStr = isSingleLine
+                  ? `L${previewContextMenu.startLine}`
                   : `L${previewContextMenu.startLine}-L${previewContextMenu.endLine}`;
-                const data = `"${previewFile.path}":${rangeStr} `;
-                
+                const absolutePath = toAbsolutePath(previewFile.path);
+                const data = `"${absolutePath}":${rangeStr} `;
+
                 insertConversationTagToActiveTerminal(data);
-                
+
                 setPreviewContextMenu(null);
               }}
             >
