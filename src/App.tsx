@@ -11,7 +11,7 @@ import { GitPanel } from "./components/git/GitPanel";
 import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { getHighlightedLines } from "./utils/highlighter";
-import { FileText, Folder, GitBranch } from "lucide-react";
+import { FileText, Folder, GitCommit } from "lucide-react";
 import {
   addUnreadCompletion,
   getUnreadCompletionCount,
@@ -2887,8 +2887,8 @@ function App() {
                       localStorage.setItem("kkcoder_right_panel_tab", "git");
                     }}
                   >
-                    <GitBranch size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                    变更
+                    <GitCommit size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
+                    提交
                   </button>
                 </div>
                 {activeSession && activeSession.path && (
