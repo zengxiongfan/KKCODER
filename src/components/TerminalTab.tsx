@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from "react";
-import { Terminal } from "xterm";
-import { FitAddon } from "xterm-addon-fit";
-import "xterm/css/xterm.css";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -406,6 +406,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(terminalRef.current);
+    // xterm 6.x 默认使用 DOM Renderer，已内置现代化重写，对 AI 终端场景性能足够。
+    // 未插入 CanvasAddon：官方 addon-canvas@0.7.0 的 peer 声明仍为 xterm ^5.0.0，与 6.0 实际尚未完全对齐，强行接入会黑屏，待官方释出 0.8 稳定版后再评估回插。
     let initialTerminalDimensions: { cols: number; rows: number } | null = null;
     try {
       fitAddon.fit();
