@@ -10,6 +10,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   GitBranch,
+  GitCommit,
+  GitCommitHorizontal,
   RefreshCw,
   Undo2,
   ChevronDown,
@@ -25,7 +27,6 @@ import {
   FilePen,
   FilePlus,
   FileMinus,
-  GitCommitHorizontal,
   ArrowUp,
   ArrowDown,
   FolderOpen,
@@ -1046,8 +1047,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
       <div className="git-header">
         <div className="git-header-row1">
           <span className="git-title">
-            <GitBranch size={13} />
-            Git 变更
+            <GitCommit size={13} />
+            提交
           </span>
           <div className="git-header-actions">
             {/* Group By 切换 */}
