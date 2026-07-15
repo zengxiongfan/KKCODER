@@ -643,33 +643,35 @@ function App() {
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   // 文件树自适应宽度：监听树内容变化，自动调整面板宽度
+  // 右侧项目树打开时一次性计算合适宽度（仅当内容超出当前宽度时自动展宽）
+  // 避免每次展开/折叠都触发宽度变动，用户可手动拖拽调整
   useEffect(() => {
     const aside = projectTreeAsideRef.current;
-    if (!aside) return;
+    if (!aside || !showProjectTree) return;
 
-    const adjustWidth = () => {
+    const timer = setTimeout(() => {
       const root = aside.querySelector(".project-tree-root");
       if (!root) return;
-      const contentWidth = (root as HTMLElement).scrollWidth;
+
+      const htmlRoot = root as HTMLElement;
+      const originalMinWidth = htmlRoot.style.minWidth;
+      htmlRoot.style.minWidth = "0";
+      const contentWidth = htmlRoot.scrollWidth;
+      htmlRoot.style.minWidth = originalMinWidth;
+
       const maxW = Math.floor(window.innerWidth * 0.4);
-      const newW = Math.max(200, Math.min(maxW, contentWidth + 4));
-      setProjectTreeWidth(newW);
-      localStorage.setItem("kkcoder_project_tree_width", newW.toString());
-    };
+      const idealW = Math.max(200, Math.min(maxW, contentWidth + 24));
 
-    // 初次渲染后测量
-    const timer = setTimeout(adjustWidth, 100);
+      setProjectTreeWidth(prev => {
+        if (idealW > prev) {
+          localStorage.setItem("kkcoder_project_tree_width", idealW.toString());
+          return idealW;
+        }
+        return prev;
+      });
+    }, 150);
 
-    // 监听子树变化（展开/折叠/加载）
-    const observer = new MutationObserver(() => {
-      setTimeout(adjustWidth, 50);
-    });
-    observer.observe(aside, { childList: true, subtree: true });
-
-    return () => {
-      clearTimeout(timer);
-      observer.disconnect();
-    };
+    return () => clearTimeout(timer);
   }, [showProjectTree, activeSession?.path]);
 
   // 将相对路径转为绝对路径（路径分隔符自适应，projectPath 为空时回退为原样返回）
