@@ -142,7 +142,7 @@ function App() {
     setActiveSessionId(id);
     const s = sessions.find((sess) => sess.id === id);
     if (s) {
-      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+      setSelectedAgent(s.type);
     }
   }, [sessions]);
 
@@ -1587,7 +1587,7 @@ function App() {
     // 联动切换左侧 agent 选中态，确保当前会话所属 agent 在侧边栏可见
     const s = sessions.find((sess) => sess.id === id);
     if (s) {
-      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+      setSelectedAgent(s.type);
     }
     // 点击任意会话标签时自动关闭恢复提示
     setShowRestoreToast(false);
@@ -1604,7 +1604,7 @@ function App() {
 
     const s = sessions.find((sess) => sess.id === sid);
     if (s) {
-      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+      setSelectedAgent(s.type);
     }
 
     const remaining = pendingRestoreIds.filter((id) => id !== sid);
@@ -1635,7 +1635,7 @@ function App() {
 
       const s = sessions.find((sess) => sess.id === nextActiveId);
       if (s) {
-        setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+        setSelectedAgent(s.type);
       }
     }
 
@@ -1842,7 +1842,7 @@ function App() {
   const handleLocateSession = (sessionId: string) => {
     const s = sessions.find((sess) => sess.id === sessionId);
     if (s) {
-      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+      setSelectedAgent(s.type);
       setHighlightSessionId(sessionId);
       log(`Locating session ${sessionId} in sidebar. Selected agent type: ${s.type}`);
     }
@@ -2348,7 +2348,7 @@ function App() {
                       setActiveSessionId(s.id);
                       setGlowingSessionIds((prev) => prev.filter((id) => id !== s.id));
                       // 联动切换左侧 agent 选中态
-                      setSelectedAgent(s.type === "pi" ? "codex" : s.type);
+                      setSelectedAgent(s.type);
                     }}
                     onMouseDown={(e) => {
                       if (e.button === 1) {
@@ -2463,7 +2463,7 @@ function App() {
                       <TerminalTab
                         sessionId={s.id}
                         directory={s.path}
-                        agentType={s.type === "pi" ? "codex" : s.type}
+                        agentType={s.type}
                         agentSessionId={s.agentSessionId}
                         isReopen={shouldResume}
                         onSpawned={() => {

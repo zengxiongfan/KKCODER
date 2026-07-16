@@ -339,6 +339,12 @@ pub async fn create_session(
     let session_id = req.id.clone();
     let name = req.name.unwrap_or_else(|| "新会话".to_string());
     let session_type = req.session_type.unwrap_or_else(|| "claude".to_string());
+    if session_type != "claude" && session_type != "codex" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsupported session type: {}", session_type),
+        ));
+    }
     let agent_session_id = req.agent_session_id.unwrap_or_default();
 
     tokio::task::spawn_blocking(move || {

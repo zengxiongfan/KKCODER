@@ -654,7 +654,6 @@ fn search_session_contents(query: String) -> Result<Vec<ContentSearchResult>, St
                 q_chars,
             ),
             "codex" => search_codex_session(&agent_session_id, &query_lower, q_chars),
-            // 其它类型（含遗留 "pi"）：跳过
             _ => None,
         };
 

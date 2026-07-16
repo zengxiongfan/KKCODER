@@ -34,8 +34,7 @@ export const CcSwitchIcon: React.FC<{ size?: number; color?: string }> = ({ size
   </svg>
 );
 
-// Agent 类型。"pi" 是遗留值（旧数据库中可能仍存在），运行时会被映射到 "codex"。
-export type AgentType = "claude" | "codex" | "pi";
+export type AgentType = "claude" | "codex";
 
 export interface Session {
   id: string;
@@ -64,7 +63,7 @@ export interface ArchivedProject {
 
 interface SidebarProps {
   selectedAgent: "claude" | "codex";
-  onSelectAgent: (agent: "claude" | "codex") => void; // 只接受合法值；旧 "pi" 在调用方已被 clamp
+  onSelectAgent: (agent: "claude" | "codex") => void;
   onOpenNewSession: (prefilledPath?: string) => void;
   onCreateSessionDirectly?: (projectPath: string) => void;
   onOpenTempSession: () => void;
