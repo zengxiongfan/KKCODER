@@ -93,6 +93,8 @@ struct ArchivedProject {
 struct PtyOutputPayload {
     session_id: String,
     data: String,
+    /// 单调递增序列号，用于前端检测并丢弃重复包（防范 ConPTY 屏幕缓冲区重发）
+    seq: u64,
 }
 
 // 获取本地 SQLite 数据库路径 (工作区 kkcoder.db)
@@ -1271,27 +1273,57 @@ fn spawn_terminal(
         let mut reader = reader;
         let mut buffer = [0u8; 4096];
         let mut seq: u64 = 0;
+        // 未完成的 UTF-8 字节前缀（上一次读取截断的多字节字符尾部）
+        let mut pending_prefix: Vec<u8> = Vec::new();
         while let Ok(n) = reader.read(&mut buffer) {
             if n == 0 {
                 log_to_file("PTY reader thread: read EOF (0 bytes). Exiting reader loop.");
                 break;
             }
-            let data = String::from_utf8_lossy(&buffer[..n]).to_string();
 
-            // 发送到前端
+            // 拼接前次残留前缀 + 本次数据，再做 UTF-8 安全切割
+            let mut chunk = pending_prefix.clone();
+            chunk.extend_from_slice(&buffer[..n]);
+            pending_prefix.clear();
+
+            // UTF-8 安全切割：回退到最后一个完整字符边界，避免中文/emoji 被截断为 U+FFFD
+            let safe_len = match std::str::from_utf8(&chunk) {
+                Ok(_) => chunk.len(),
+                Err(e) => {
+                    let valid = e.valid_up_to();
+                    // 将不完整的多字节字符字节暂存到下次读取
+                    pending_prefix.extend_from_slice(&chunk[valid..]);
+                    valid
+                }
+            };
+
+            // 极端情况：本次全是多字节字符的尾部（safe_len == 0），跳过等下次拼接
+            if safe_len == 0 {
+                continue;
+            }
+
+            let data = String::from_utf8_lossy(&chunk[..safe_len]).to_string();
+            // 丢弃纯空白/控制字符的无效包（如只有 \0 或 \r 的切割残余）
+            if data.is_empty() {
+                continue;
+            }
+
+            seq += 1;
+
+            // 发送到前端（带序列号，用于去重）
             app_handle_clone
                 .emit(
                     "pty-output",
                     PtyOutputPayload {
                         session_id: session_id_clone.clone(),
                         data: data.clone(),
+                        seq,
                     },
                 )
                 .ok();
 
             // 发送到远程广播通道（带序号和时间戳，用于断线重连）
             if let Some(ref output_tx) = remote_output_tx {
-                seq += 1;
                 let frame = remote::state::OutputFrame {
                     seq,
                     session_id: session_id_clone.clone(),

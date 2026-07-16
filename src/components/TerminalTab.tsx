@@ -675,15 +675,24 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     fitAddonRef.current = fitAddon;
 
     let unlistenFn: (() => void) | null = null;
+    let listenerCancelled = false; // 防范异步 listener 竞态：cleanup 后短路
+    let lastSeq: number = 0; // 用于检测并丢弃重复包（防范 ConPTY 屏幕缓冲区重发）
 
     // 2. 异步注册监听 Rust 后端 PTY Event 消息流
     log("Setting up pty-output listener...");
     const setupListener = async () => {
       try {
-        unlistenFn = await listen<{ session_id: string; data: string }>(
+        const fn = await listen<{ session_id: string; data: string; seq: number }>(
           "pty-output",
           (event) => {
+            if (listenerCancelled) return; // cleanup 后立即短路，防范重复写入
             if (event.payload.session_id === sessionId) {
+              // 序列号去重：丢弃重复包（ConPTY 可能重发屏幕内容）
+              if (event.payload.seq !== 0 && event.payload.seq <= lastSeq) {
+                log(`Duplicate PTY packet detected: seq=${event.payload.seq}, lastSeq=${lastSeq}. Skipping.`);
+                return;
+              }
+              lastSeq = event.payload.seq;
               term.write(event.payload.data);
 
               // 智能回答/任务执行完毕检测与提示音系统
@@ -740,6 +749,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             }
           }
         );
+        // 如果 cleanup 已经执行，立即销毁新注册的 listener，杜绝泄漏
+        if (listenerCancelled) {
+          fn();
+        } else {
+          unlistenFn = fn;
+        }
         log("pty-output listener registered successfully.");
       } catch (e) {
         log(`Failed to set up pty-output listener: ${e}`);
@@ -1018,6 +1033,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     return () => {
       log("TerminalTab unmounting. Cleaning up...");
+      // 先标记 listener 已取消，防范异步 listener 竞态泄漏
+      listenerCancelled = true;
       if (resizeTimeout) {
         clearTimeout(resizeTimeout);
       }
@@ -1047,6 +1064,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       onResizeDisposable.dispose();
       if (unlistenFn) {
         unlistenFn();
+        unlistenFn = null;
       }
       term.dispose();
       log("TerminalTab cleanup finished.");
