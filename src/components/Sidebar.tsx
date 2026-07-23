@@ -505,6 +505,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   Object.values(projectsMap).forEach((project) => {
     project.sessions = sortSessionsByActivityDesc(project.sessions);
+    // 当前活跃会话置顶（项目内排序后，将 activeSession 挪到最前面）
+    if (activeSessionId) {
+      const idx = project.sessions.findIndex((s) => s.id === activeSessionId);
+      if (idx > 0) {
+        const [active] = project.sessions.splice(idx, 1);
+        project.sessions.unshift(active);
+      }
+    }
   });
 
   // 提取收藏的会话并附加匹配片段
