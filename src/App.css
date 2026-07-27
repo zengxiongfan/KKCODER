@@ -5886,6 +5886,16 @@ input:checked + .switch-slider:before {
   opacity: 0.75;
 }
 
+/* 行内具体提交日期：次级弱化显示，面板过窄时优先被截断省略 */
+.branch-commit-date {
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
 .branch-commit-sep {
   opacity: 0.35;
   flex-shrink: 0;
@@ -5943,6 +5953,16 @@ input:checked + .switch-slider:before {
   gap: 8px;
   animation: commitTooltipFadeIn 0.15s ease-out;
   pointer-events: auto;
+}
+
+/* 透明桥接层：覆盖信息卡与提交行之间的 8px 间隙，保证鼠标即隐模式下也能无缝移入卡片 */
+.commit-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 8px;
+  height: 100%;
 }
 
 @keyframes commitTooltipFadeIn {

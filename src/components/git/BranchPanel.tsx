@@ -197,8 +197,6 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
   const [commitStatCache, setCommitStatCache] = useState<Map<string, GitCommitStat>>(new Map());
   const [commitStatLoadingSha, setCommitStatLoadingSha] = useState<string | null>(null);
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
-  const commitTooltipShowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const commitTooltipHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 多仓库切换（与 GitPanel 的机制保持一致）
   const [repositories, setRepositories] = useState<GitRepoInfo[]>([]);
@@ -435,64 +433,51 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     }
   };
 
-  // ── 提交悬浮信息卡交互 ──
+  // ── 提交悬浮信息卡交互（即显即隐，通过 relatedTarget 判断鼠标去向，保证可移入卡片操作） ──
+  const isInsideCommitTooltip = (target: EventTarget | null) =>
+    target instanceof Element && !!target.closest(".commit-tooltip");
+
+  const isInsideCommitRow = (target: EventTarget | null) =>
+    target instanceof Element && !!target.closest(".branch-commit-row");
+
   const handleCommitMouseEnter = (e: React.MouseEvent, commit: GitCommitEntry) => {
-    if (commitTooltipHideTimerRef.current) {
-      clearTimeout(commitTooltipHideTimerRef.current);
-      commitTooltipHideTimerRef.current = null;
-    }
-    // 提前保存 rect（React 合成事件在 setTimeout 回调时已被回收）
     const rect = e.currentTarget.getBoundingClientRect();
     const x = rect.left - 8; // tooltip 右边缘位置
     const y = rect.top + rect.height / 2; // tooltip 垂直中心位置
     const targetSha = commit.sha;
-    commitTooltipShowTimerRef.current = setTimeout(() => {
-      setCommitTooltip({ visible: true, x, y, commit });
-      // 延时后才请求 stat（避免快速划过时的无效请求）
-      if (!commitStatCache.has(targetSha) && commitStatLoadingSha !== targetSha) {
-        setCommitStatLoadingSha(targetSha);
-        invoke<GitCommitStat>("git_commit_stat", {
-          projectPath: repoPath,
-          sha: targetSha,
-        })
-          .then((stat) => {
-            setCommitStatCache((prev) => {
-              const next = new Map(prev);
-              next.set(targetSha, stat);
-              return next;
-            });
-          })
-          .catch(() => {
-            /* 静默失败：tooltip 会显示“无变更统计” */
-          })
-          .finally(() => {
-            setCommitStatLoadingSha((cur) => (cur === targetSha ? null : cur));
+    setCommitTooltip({ visible: true, x, y, commit });
+    if (!commitStatCache.has(targetSha) && commitStatLoadingSha !== targetSha) {
+      setCommitStatLoadingSha(targetSha);
+      invoke<GitCommitStat>("git_commit_stat", {
+        projectPath: repoPath,
+        sha: targetSha,
+      })
+        .then((stat) => {
+          setCommitStatCache((prev) => {
+            const next = new Map(prev);
+            next.set(targetSha, stat);
+            return next;
           });
-      }
-    }, 300);
-  };
-
-  const handleCommitMouseLeave = () => {
-    if (commitTooltipShowTimerRef.current) {
-      clearTimeout(commitTooltipShowTimerRef.current);
-      commitTooltipShowTimerRef.current = null;
-    }
-    commitTooltipHideTimerRef.current = setTimeout(() => {
-      setCommitTooltip((prev) => ({ ...prev, visible: false }));
-    }, 120);
-  };
-
-  const handleCommitTooltipMouseEnter = () => {
-    if (commitTooltipHideTimerRef.current) {
-      clearTimeout(commitTooltipHideTimerRef.current);
-      commitTooltipHideTimerRef.current = null;
+        })
+        .catch(() => {
+          /* 静默失败：tooltip 会显示“无变更统计” */
+        })
+        .finally(() => {
+          setCommitStatLoadingSha((cur) => (cur === targetSha ? null : cur));
+        });
     }
   };
 
-  const handleCommitTooltipMouseLeave = () => {
-    commitTooltipHideTimerRef.current = setTimeout(() => {
-      setCommitTooltip((prev) => ({ ...prev, visible: false }));
-    }, 120);
+  const handleCommitMouseLeave = (e: React.MouseEvent) => {
+    // 移入信息卡 → 保持显示，否则立即隐藏
+    if (isInsideCommitTooltip(e.relatedTarget)) return;
+    setCommitTooltip((prev) => ({ ...prev, visible: false }));
+  };
+
+  const handleCommitTooltipMouseLeave = (e: React.MouseEvent) => {
+    // 移回提交行 → 由该行的 mouseenter 接管刷新，避免隐藏后重现引起的闪烁
+    if (isInsideCommitRow(e.relatedTarget)) return;
+    setCommitTooltip((prev) => ({ ...prev, visible: false }));
   };
 
   const handleCopySha = async (sha: string) => {
@@ -506,14 +491,6 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     setCommitStatCache(new Map());
     setCommitTooltip({ visible: false, x: 0, y: 0, commit: null });
   }, [repoPath]);
-
-  // 卸载时清理定时器
-  useEffect(() => {
-    return () => {
-      if (commitTooltipShowTimerRef.current) clearTimeout(commitTooltipShowTimerRef.current);
-      if (commitTooltipHideTimerRef.current) clearTimeout(commitTooltipHideTimerRef.current);
-    };
-  }, []);
 
   // ── 渲染 ──
   return (
@@ -748,6 +725,7 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
                       <span className="branch-commit-author">{c.author || "unknown"}</span>
                       <span className="branch-commit-sep">·</span>
                       <span className="branch-commit-time">{formatRelativeTime(c.timestamp)}</span>
+                      <span className="branch-commit-date">({formatFullDateTime(c.timestamp)})</span>
                       {c.parents.length > 1 && (
                         <>
                           <span className="branch-commit-sep">·</span>
@@ -788,7 +766,6 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
               transform: "translate(-100%, -50%)",
               zIndex: 10000,
             }}
-            onMouseEnter={handleCommitTooltipMouseEnter}
             onMouseLeave={handleCommitTooltipMouseLeave}
           >
             {/* Header 行：作者 + 相对时间 + 绝对时间 */}
