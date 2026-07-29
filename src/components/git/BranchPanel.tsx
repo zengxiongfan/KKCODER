@@ -26,6 +26,8 @@ import {
   Copy,
   User,
 } from "lucide-react";
+import { DiffViewerModal } from "./DiffViewerModal";
+import { FileIcon } from "../../utils/fileIcons";
 
 // ─────────────────────────── 类型 ───────────────────────────
 
@@ -65,6 +67,21 @@ interface GitCommitStat {
   insertions: number;
   deletions: number;
 }
+
+interface GitCommitFileChange {
+  path: string;
+  status: string;
+  added: number;
+  deleted: number;
+}
+
+// 提交文件状态配色（与 GitPanel 变更列表一致）
+const COMMIT_FILE_STATUS_COLORS: Record<string, string> = {
+  M: "#60a5fa",
+  A: "#4ade80",
+  D: "#f87171",
+  R: "#c084fc",
+};
 
 interface BranchPanelProps {
   projectPath: string;
@@ -197,6 +214,13 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
   const [commitStatCache, setCommitStatCache] = useState<Map<string, GitCommitStat>>(new Map());
   const [commitStatLoadingSha, setCommitStatLoadingSha] = useState<string | null>(null);
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
+
+  // 提交行展开（手风琴）：展示该提交变更的文件列表，点文件弹 diff
+  const [expandedSha, setExpandedSha] = useState<string | null>(null);
+  const [commitFilesCache, setCommitFilesCache] = useState<Map<string, GitCommitFileChange[]>>(new Map());
+  const [commitFilesLoadingSha, setCommitFilesLoadingSha] = useState<string | null>(null);
+  const [commitFilesError, setCommitFilesError] = useState<string | null>(null);
+  const [commitDiffFile, setCommitDiffFile] = useState<{ sha: string; path: string; status: string } | null>(null);
 
   // 多仓库切换（与 GitPanel 的机制保持一致）
   const [repositories, setRepositories] = useState<GitRepoInfo[]>([]);
@@ -433,6 +457,40 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     }
   };
 
+  // ── 提交行展开/收起：展开时懒加载该提交的文件变更列表（按 SHA 缓存） ──
+  const handleToggleCommitExpand = (sha: string) => {
+    // 展开时隐藏悬浮信息卡，避免遮挡文件列表
+    setCommitTooltip((prev) => ({ ...prev, visible: false }));
+    setCommitFilesError(null);
+    setExpandedSha((prev) => {
+      const next = prev === sha ? null : sha;
+      if (next && !commitFilesCache.has(sha)) {
+        setCommitFilesLoadingSha(sha);
+        const requestPath = repoPath;
+        invoke<GitCommitFileChange[]>("git_commit_files", {
+          projectPath: requestPath,
+          sha,
+        })
+          .then((files) => {
+            if (projectPathRef.current !== projectPath || repoPath !== requestPath) return;
+            setCommitFilesCache((prevCache) => {
+              const nextCache = new Map(prevCache);
+              nextCache.set(sha, files);
+              return nextCache;
+            });
+          })
+          .catch((e) => {
+            if (projectPathRef.current !== projectPath || repoPath !== requestPath) return;
+            setCommitFilesError(String(e));
+          })
+          .finally(() => {
+            setCommitFilesLoadingSha((cur) => (cur === sha ? null : cur));
+          });
+      }
+      return next;
+    });
+  };
+
   // ── 提交悬浮信息卡交互（即显即隐，通过 relatedTarget 判断鼠标去向，保证可移入卡片操作） ──
   const isInsideCommitTooltip = (target: EventTarget | null) =>
     target instanceof Element && !!target.closest(".commit-tooltip");
@@ -486,10 +544,14 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     setTimeout(() => setCopiedSha((cur) => (cur === sha ? null : cur)), 1500);
   };
 
-  // 项目/仓库/分支列表刷新时 → 清理 stat 缓存（避开遗留旧仓库的提交统计）
+  // 项目/仓库/分支列表刷新时 → 清理 stat/文件列表缓存与展开态（避开遗留旧仓库数据）
   useEffect(() => {
     setCommitStatCache(new Map());
     setCommitTooltip({ visible: false, x: 0, y: 0, commit: null });
+    setExpandedSha(null);
+    setCommitFilesCache(new Map());
+    setCommitFilesError(null);
+    setCommitDiffFile(null);
   }, [repoPath]);
 
   // ── 渲染 ──
@@ -711,31 +773,78 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
             <div className="git-empty">无提交记录</div>
           ) : (
             <>
-              {commits.map((c) => (
-                <div
-                  key={c.sha}
-                  className="branch-commit-row"
-                  onMouseEnter={(e) => handleCommitMouseEnter(e, c)}
-                  onMouseLeave={handleCommitMouseLeave}
-                >
-                  <span className="branch-commit-sha">{c.shortSha}</span>
-                  <div className="branch-commit-main">
-                    <div className="branch-commit-summary">{c.summary || "(无提交信息)"}</div>
-                    <div className="branch-commit-meta">
-                      <span className="branch-commit-author">{c.author || "unknown"}</span>
-                      <span className="branch-commit-sep">·</span>
-                      <span className="branch-commit-time">{formatRelativeTime(c.timestamp)}</span>
-                      <span className="branch-commit-date">({formatFullDateTime(c.timestamp)})</span>
-                      {c.parents.length > 1 && (
-                        <>
+              {commits.map((c) => {
+                const expanded = expandedSha === c.sha;
+                const files = commitFilesCache.get(c.sha);
+                const filesLoading = commitFilesLoadingSha === c.sha;
+                return (
+                  <React.Fragment key={c.sha}>
+                    <div
+                      className={`branch-commit-row ${expanded ? "expanded" : ""}`}
+                      onClick={() => handleToggleCommitExpand(c.sha)}
+                      onMouseEnter={(e) => handleCommitMouseEnter(e, c)}
+                      onMouseLeave={handleCommitMouseLeave}
+                    >
+                      <span
+                        className="branch-commit-expand-arrow"
+                        style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
+                      >
+                        <ChevronRight size={10} strokeWidth={2} />
+                      </span>
+                      <span className="branch-commit-sha">{c.shortSha}</span>
+                      <div className="branch-commit-main">
+                        <div className="branch-commit-summary">{c.summary || "(无提交信息)"}</div>
+                        <div className="branch-commit-meta">
+                          <span className="branch-commit-author">{c.author || "unknown"}</span>
                           <span className="branch-commit-sep">·</span>
-                          <span className="branch-commit-merge">merge</span>
-                        </>
-                      )}
+                          <span className="branch-commit-time">{formatRelativeTime(c.timestamp)}</span>
+                          <span className="branch-commit-date">({formatFullDateTime(c.timestamp)})</span>
+                          {c.parents.length > 1 && (
+                            <>
+                              <span className="branch-commit-sep">·</span>
+                              <span className="branch-commit-merge">merge</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                    {expanded && (
+                      <div className="branch-commit-files">
+                        {filesLoading ? (
+                          <div className="branch-commit-files-hint">加载文件列表...</div>
+                        ) : commitFilesError ? (
+                          <div className="branch-commit-files-hint error">{commitFilesError}</div>
+                        ) : !files || files.length === 0 ? (
+                          <div className="branch-commit-files-hint">无文件变更</div>
+                        ) : (
+                          files.map((f) => {
+                            const fileName = f.path.split("/").pop() || f.path;
+                            const dirPath = f.path.slice(0, f.path.length - fileName.length).replace(/\/$/, "");
+                            const statusColor = COMMIT_FILE_STATUS_COLORS[f.status] || "var(--text-secondary)";
+                            return (
+                              <div
+                                key={f.path}
+                                className="branch-commit-file-row"
+                                title={`${f.path}（点击查看 diff）`}
+                                onClick={() => setCommitDiffFile({ sha: c.sha, path: f.path, status: f.status })}
+                              >
+                                <span className="branch-commit-file-status" style={{ color: statusColor }}>
+                                  {f.status}
+                                </span>
+                                <FileIcon name={fileName} size={12} className="branch-commit-file-icon" />
+                                <span className="branch-commit-file-name">{fileName}</span>
+                                {dirPath && <span className="branch-commit-file-dir">{dirPath}</span>}
+                                {f.added > 0 && <span className="branch-commit-file-stat plus">+{f.added}</span>}
+                                {f.deleted > 0 && <span className="branch-commit-file-stat minus">-{f.deleted}</span>}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
               {commitsHasMore && (
                 <button
                   className="branch-commits-more"
@@ -749,6 +858,17 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
           )}
         </div>
       </div>
+
+      {/* 提交内文件 diff 弹窗（只读提交模式） */}
+      {commitDiffFile && (
+        <DiffViewerModal
+          projectPath={repoPath}
+          filePath={commitDiffFile.path}
+          status={commitDiffFile.status}
+          sha={commitDiffFile.sha}
+          onClose={() => setCommitDiffFile(null)}
+        />
+      )}
 
       {/* 提交悬浮信息卡 */}
       {commitTooltip.visible && commitTooltip.commit && (() => {

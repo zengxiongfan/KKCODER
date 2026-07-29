@@ -110,6 +110,16 @@ pub struct GitCommitStat {
     pub deletions: usize,
 }
 
+/// 提交内单个文件的变更概要
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitFileChange {
+    pub path: String,
+    pub status: String,
+    pub added: i32,
+    pub deleted: i32,
+}
+
 // ─────────────────────────── 辅助函数 ───────────────────────────
 
 fn open_git_repo<P: AsRef<Path>>(path: P) -> Result<Repository, String> {
@@ -1542,6 +1552,111 @@ pub async fn git_commit_stat(project_path: String, sha: String) -> Result<GitCom
             insertions: stats.insertions(),
             deletions: stats.deletions(),
         })
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 列出某提交变更的文件（与第一个父提交对比；首提交对比空树）
+#[tauri::command]
+pub async fn git_commit_files(
+    project_path: String,
+    sha: String,
+) -> Result<Vec<GitCommitFileChange>, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+        let oid = git2::Oid::from_str(&sha).map_err(|_| "invalid_sha".to_string())?;
+        let commit = repo.find_commit(oid).map_err(|e| format!("find_commit_failed: {e}"))?;
+
+        let commit_tree = commit.tree().map_err(|e| format!("tree_failed: {e}"))?;
+        let parent_tree = if commit.parent_count() > 0 {
+            let parent = commit.parent(0).map_err(|e| format!("parent_failed: {e}"))?;
+            Some(parent.tree().map_err(|e| format!("parent_tree_failed: {e}"))?)
+        } else {
+            None
+        };
+
+        let mut opts = DiffOptions::new();
+        let mut diff = repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut opts))
+            .map_err(|e| format!("diff_failed: {e}"))?;
+        // 重命名检测：让 R 状态正确呈现而非 A+D 两条
+        let _ = diff.find_similar(None);
+
+        let mut files = Vec::new();
+        for (idx, delta) in diff.deltas().enumerate() {
+            let status = match delta.status() {
+                git2::Delta::Added => "A",
+                git2::Delta::Deleted => "D",
+                git2::Delta::Renamed => "R",
+                _ => "M",
+            };
+            let file_path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if file_path.is_empty() {
+                continue;
+            }
+            let (added, deleted) = match git2::Patch::from_diff(&diff, idx) {
+                Ok(Some(patch)) => match patch.line_stats() {
+                    Ok((_, add, del)) => (add as i32, del as i32),
+                    Err(_) => (0, 0),
+                },
+                _ => (0, 0),
+            };
+            files.push(GitCommitFileChange {
+                path: file_path,
+                status: status.to_string(),
+                added,
+                deleted,
+            });
+        }
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(files)
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 获取某提交中单个文件的 unified diff 文本
+#[tauri::command]
+pub async fn git_commit_file_diff(
+    project_path: String,
+    sha: String,
+    file_path: String,
+) -> Result<String, String> {
+    validate_repo_relative_path(&file_path)?;
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+        let oid = git2::Oid::from_str(&sha).map_err(|_| "invalid_sha".to_string())?;
+        let commit = repo.find_commit(oid).map_err(|e| format!("find_commit_failed: {e}"))?;
+
+        let commit_tree = commit.tree().map_err(|e| format!("tree_failed: {e}"))?;
+        let parent_tree = if commit.parent_count() > 0 {
+            let parent = commit.parent(0).map_err(|e| format!("parent_failed: {e}"))?;
+            Some(parent.tree().map_err(|e| format!("parent_tree_failed: {e}"))?)
+        } else {
+            None
+        };
+
+        let mut opts = DiffOptions::new();
+        opts.pathspec(&file_path);
+        opts.context_lines(3);
+        let diff = repo
+            .diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), Some(&mut opts))
+            .map_err(|e| format!("diff_failed: {e}"))?;
+        format_diff_to_text(diff, &file_path)
     })
     .await
     .map_err(|e| format!("task_failed: {e}"))?

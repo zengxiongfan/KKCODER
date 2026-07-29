@@ -26,6 +26,8 @@ interface DiffViewerModalProps {
   projectPath: string;
   filePath: string;
   status: string;
+  /** 提交模式：传入 commit SHA 时展示该提交内的文件 diff（只读，无回滚操作） */
+  sha?: string;
   onClose: () => void;
   onRequestDiscard?: () => void;
 }
@@ -34,6 +36,7 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
   projectPath,
   filePath,
   status,
+  sha,
   onClose,
   onRequestDiscard,
 }) => {
@@ -52,11 +55,18 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
       setLoading(true);
       setError(null);
       try {
-        const result = await invoke<string>("git_get_file_diff", {
-          projectPath,
-          filePath,
-          status,
-        });
+        // 提交模式拉取历史提交 diff；否则拉取工作区 diff
+        const result = sha
+          ? await invoke<string>("git_commit_file_diff", {
+              projectPath,
+              sha,
+              filePath,
+            })
+          : await invoke<string>("git_get_file_diff", {
+              projectPath,
+              filePath,
+              status,
+            });
         if (!cancelled) {
           setDiffText(result);
         }
@@ -75,7 +85,7 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [projectPath, filePath, status]);
+  }, [projectPath, filePath, status, sha]);
 
   // ── 切换文件时清空行选择 ──
   useEffect(() => {
@@ -123,8 +133,8 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
   const parsedFile = parsed?.file ?? null;
   const tokens = parsed?.tokens ?? null;
 
-  // ── 仅未跟踪文件不可回滚 ──
-  const canDiscard = status !== "U" && status !== "??";
+  // ── 未跟踪文件与历史提交（只读）不可回滚 ──
+  const canDiscard = !sha && status !== "U" && status !== "??";
 
   // ── 切换单个变更行选中（仅 insert/delete 可选） ──
   const toggleSelect = useCallback(({ change }: { change: ChangeData | null }) => {
@@ -202,7 +212,10 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
       <div className="diff-modal" onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div className="diff-modal-header">
-          <span className="diff-modal-title">Diff: {fileName}</span>
+          <span className="diff-modal-title">
+            Diff: {fileName}
+            {sha && <span className="diff-modal-sha">@ {sha.slice(0, 7)}</span>}
+          </span>
           <div className="diff-modal-actions">
             {canDiscard && onRequestDiscard && (
               <button

@@ -5284,6 +5284,16 @@ input:checked + .switch-slider:before {
   flex: 1;
 }
 
+/* 提交模式下标题里的短 SHA 标记 */
+.diff-modal-sha {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--color-yellow, #facc15);
+  background: rgba(250, 204, 21, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .diff-modal-actions {
   display: flex;
   align-items: center;
@@ -5825,7 +5835,7 @@ input:checked + .switch-slider:before {
   align-items: flex-start;
   gap: 8px;
   padding: 6px 10px;
-  cursor: default;
+  cursor: pointer;
   border-left: 2px solid transparent;
   transition: background 0.1s;
 }
@@ -5833,6 +5843,107 @@ input:checked + .switch-slider:before {
 .branch-commit-row:hover {
   background: var(--bg-hover-item, rgba(148, 163, 184, 0.08));
   border-left-color: var(--color-orange, #fab387);
+}
+
+.branch-commit-row.expanded {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.08));
+  border-left-color: var(--color-orange, #fab387);
+}
+
+/* 提交行展开箭头 */
+.branch-commit-expand-arrow {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  transition: transform 0.15s;
+}
+
+/* 提交文件展开区（手风琴） */
+.branch-commit-files {
+  padding: 2px 0 6px 0;
+  border-left: 2px solid var(--color-orange, #fab387);
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.branch-commit-files-hint {
+  padding: 6px 10px 6px 30px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.branch-commit-files-hint.error {
+  color: #f87171;
+  opacity: 1;
+}
+
+.branch-commit-file-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 30px;
+  cursor: pointer;
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.branch-commit-file-row:hover {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.1));
+}
+
+.branch-commit-file-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.branch-commit-file-icon {
+  flex-shrink: 0;
+}
+
+.branch-commit-file-name {
+  color: var(--text-primary);
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branch-commit-file-dir {
+  color: var(--text-secondary);
+  opacity: 0.55;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.branch-commit-file-stat {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.branch-commit-file-stat.plus {
+  color: #4ade80;
+}
+
+.branch-commit-file-stat.minus {
+  color: #f87171;
+}
+
+/* 同时存在 +/- 时，只有首个统计负责推到右侧，后者紧随 */
+.branch-commit-file-stat.plus + .branch-commit-file-stat.minus {
+  margin-left: 4px;
 }
 
 .branch-commit-sha {
