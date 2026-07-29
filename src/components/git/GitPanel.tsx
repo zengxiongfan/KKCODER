@@ -725,8 +725,8 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
       try {
         await invoke("git_watch_start", { projectPath: repoPath });
         const window = await getCurrentWindow();
-        unlisten = await window.listen<{ project_path: string }>("git-changed", (event) => {
-          if (event.payload.project_path === repoPath) {
+        unlisten = await window.listen<{ projectPath: string }>("git-changed", (event) => {
+          if (event.payload.projectPath === repoPath) {
             fetchChanges(true);
             fetchBranchStatus();
           }

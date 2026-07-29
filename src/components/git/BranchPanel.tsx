@@ -87,6 +87,9 @@ interface BranchPanelProps {
   projectPath: string;
 }
 
+// watcher 启动失败时的轮询兜底间隔（与 GitPanel 保持一致）
+const FALLBACK_POLL_INTERVAL_MS = 15000;
+
 interface GitRepoInfo {
   relativePath: string;
   absolutePath: string;
@@ -349,26 +352,53 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRef, repoPath]);
 
-  // 监听 fs-watcher 事件（git-changed）→ 同步刷新分支列表
+  // fs-watcher：启动后端监听（.git/HEAD、index 等变化）→ 同步刷新分支列表；
+  // watcher 启动失败时降级为慢轮询兜底
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
     const setup = async () => {
       try {
+        await invoke("git_watch_start", { projectPath: repoPath });
         const win = await getCurrentWindow();
-        unlisten = await win.listen<{ project_path: string }>("git-changed", (event) => {
-          if (event.payload.project_path === repoPath) {
+        unlisten = await win.listen<{ projectPath: string }>("git-changed", (event) => {
+          if (event.payload.projectPath === repoPath) {
             fetchBranches(true);
           }
         });
       } catch {
-        /* 忽略 */
+        intervalId = setInterval(() => {
+          fetchBranches(true);
+        }, FALLBACK_POLL_INTERVAL_MS);
+        unlisten = () => { if (intervalId) clearInterval(intervalId); };
       }
     };
     setup();
     return () => {
       if (unlisten) unlisten();
+      invoke("git_watch_stop").catch(() => {});
     };
   }, [repoPath, fetchBranches]);
+
+  // 焦点刷新兜底：窗口重新活跃/可见时静默刷新分支列表
+  useEffect(() => {
+    const handleFocus = () => {
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        fetchBranches(true);
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        fetchBranches(true);
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [fetchBranches]);
 
   // ── 派生数据 ──
   const filterLower = filter.trim().toLowerCase();
