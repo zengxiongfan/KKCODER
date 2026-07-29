@@ -1639,7 +1639,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             <button
               className="git-commit-btn caret"
               onClick={() => setCommitMenuOpen(!commitMenuOpen)}
-              disabled={committing}
+              disabled={committing || pushing || committableCount === 0 || commitMsg.trim().length === 0}
               title="切换提交方式"
             >
               <ChevronDown size={11} />
@@ -1736,11 +1736,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             </button>
           </div>
         ) : (
-          /* 态四：干净且已同步 → 置灰 */
+          /* 态四：干净且已同步 → 置灰提交按钮（空闲态，与 VSCode 对齐） */
           <div className="git-commit-split">
             <button className="git-commit-btn main" disabled>
-              <Check size={12} />
-              已是最新
+              <GitCommitHorizontal size={12} />
+              {commitMode === "commit-push" ? "提交并推送 (0)" : "提交 (0)"}
+            </button>
+            <button className="git-commit-btn caret" disabled>
+              <ChevronDown size={11} />
             </button>
           </div>
         )}
