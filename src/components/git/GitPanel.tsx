@@ -62,9 +62,9 @@ interface GitBranchStatus {
   upstream: string | null;
   ahead: number;
   behind: number;
-  has_upstream: boolean;
+  hasUpstream: boolean;
   detached: boolean;
-  pending_op: string | null;
+  pendingOp: string | null;
 }
 
 interface GitRepoInfo {
@@ -689,7 +689,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
 
   // 冲突检测
   const hasConflicts = changes.some((c) => c.status === "C");
-  const pendingOp = branchStatus?.pending_op ?? null;
+  const pendingOp = branchStatus?.pendingOp ?? null;
 
   // ── 数据获取 ──
   const fetchChanges = useCallback(async (silent = false) => {
@@ -1006,7 +1006,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const doPush = async () => {
     setPushing(true);
     try {
-      const upstream = branchStatus?.has_upstream;
+      const upstream = branchStatus?.hasUpstream;
       await invoke("git_push", {
         projectPath: repoPath,
         setUpstream: !upstream,
@@ -1103,7 +1103,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const runCommitAction = async () => {
     const ok = await handleCommit();
     if (ok && commitMode === "commit-push") {
-      if (branchStatus?.has_upstream) {
+      if (branchStatus?.hasUpstream) {
         void doPush();
       } else if (branchStatus?.branch) {
         requestPublish();
@@ -1674,27 +1674,27 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
               </>
             )}
           </div>
-        ) : !branchStatus.has_upstream && branchStatus.branch ? (
-          /* 态二：工作区干净 + 无上游 → 发布分支（remote 可选可记忆） */
+        ) : !branchStatus.hasUpstream && branchStatus.branch ? (
+          /* 态二：工作区干净 + 无上游 → 推送分支（remote 可选可记忆） */
           <div className="git-commit-split git-dropdown-wrapper">
             <button
               className="git-commit-btn main publish"
               onClick={requestPublish}
               disabled={pushing}
-              title={publishRemote ? `git push -u ${publishRemote} ${branchStatus.branch}` : "选择要发布到的远程"}
+              title={publishRemote ? `git push -u ${publishRemote} ${branchStatus.branch}` : "选择要推送到的远程"}
             >
               <Upload size={12} className={pushing ? "spinning" : ""} />
               {pushing
-                ? "发布中..."
+                ? "推送中..."
                 : publishRemote
-                  ? `发布分支到 ${publishRemote}`
-                  : "发布分支"}
+                  ? `推送到 ${publishRemote}/${branchStatus.branch}`
+                  : "推送分支"}
             </button>
             <button
               className="git-commit-btn caret"
               onClick={() => void openPublishMenu()}
               disabled={pushing}
-              title="选择发布目标远程"
+              title="选择推送目标远程"
             >
               <ChevronDown size={11} />
             </button>
@@ -1711,7 +1711,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                         className={`git-dropdown-item ${publishRemote === r ? "active" : ""}`}
                         onClick={() => void handlePublish(r)}
                       >
-                        <span>发布到 {r}</span>
+                        <span>推送到 {r}/{branchStatus.branch}</span>
                         {publishRemote === r && <Check size={11} />}
                       </button>
                     ))
@@ -1853,7 +1853,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             )}
           </div>
 
-          {!branchStatus.detached && branchStatus.has_upstream ? (
+          {!branchStatus.detached && branchStatus.hasUpstream ? (
             <span className="git-sync-badges">
               <span className={`git-sync-badge ${branchStatus.behind > 0 ? "lit behind" : ""}`}>
                 <ArrowDown size={10} />
@@ -1881,7 +1881,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
               <button
                 className="git-sync-icon-btn"
                 onClick={() => void handlePull(pullStrategy)}
-                disabled={pulling || fetching || branchStatus.detached || !branchStatus.has_upstream}
+                disabled={pulling || fetching || branchStatus.detached || !branchStatus.hasUpstream}
                 title={`拉取 Pull (${PULL_STRATEGY_LABELS[pullStrategy] || pullStrategy})`}
               >
                 <Download size={13} className={pulling ? "spinning" : ""} />
@@ -1917,9 +1917,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             </div>
             <button
               className="git-sync-icon-btn"
-              onClick={() => (branchStatus.has_upstream ? void doPush() : requestPublish())}
+              onClick={() => (branchStatus.hasUpstream ? void doPush() : requestPublish())}
               disabled={pushing || committing || fetching || branchStatus.detached || !branchStatus.branch}
-              title={branchStatus.has_upstream ? "推送 (Push)" : publishRemote ? `发布分支到 ${publishRemote}` : "发布分支（选择远程）"}
+              title={branchStatus.hasUpstream ? "推送 (Push)" : publishRemote ? `推送到 ${publishRemote}/${branchStatus.branch}` : "推送分支（选择远程）"}
             >
               <Upload size={13} className={pushing ? "spinning" : ""} />
               {branchStatus.ahead > 0 && <span className="git-sync-num">{branchStatus.ahead}</span>}
