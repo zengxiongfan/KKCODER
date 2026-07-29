@@ -1166,6 +1166,29 @@ pub async fn git_branch_status(project_path: String) -> Result<GitBranchStatus, 
                             behind = b;
                         }
                     }
+                } else if let Ok(config) = repo.config() {
+                    // 回退：libgit2 的 upstream() 要求远程跟踪引用存在，引用缺失时会误报无上游；
+                    // 而 git push / VSCode 只认 branch.<name>.remote/merge 配置，这里与其对齐。
+                    let remote_key = format!("branch.{shorthand}.remote");
+                    let merge_key = format!("branch.{shorthand}.merge");
+                    if let (Ok(remote_name), Ok(merge_ref)) =
+                        (config.get_string(&remote_key), config.get_string(&merge_key))
+                    {
+                        let branch_name = merge_ref.strip_prefix("refs/heads/").unwrap_or(&merge_ref);
+                        has_upstream = true;
+                        upstream = Some(format!("{remote_name}/{branch_name}"));
+                        // 若远程跟踪引用存在，仍可计算 ahead/behind；缺失则保持 0
+                        if let Ok(reference) =
+                            repo.find_reference(&format!("refs/remotes/{remote_name}/{branch_name}"))
+                        {
+                            if let (Some(local), Some(up_oid)) = (local_oid, reference.target()) {
+                                if let Ok((a, b)) = repo.graph_ahead_behind(local, up_oid) {
+                                    ahead = a;
+                                    behind = b;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1194,21 +1217,58 @@ pub async fn git_fetch(project_path: String) -> Result<String, String> {
     .map_err(|e| format!("task_failed: {e}"))?
 }
 
-/// 推送
+/// 列出所有 remote 名（origin 置顶，其余字母序）
+#[tauri::command]
+pub async fn git_list_remotes(project_path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+        let remotes = repo.remotes().map_err(|e| format!("list_remotes_failed: {e}"))?;
+        let mut names: Vec<String> = remotes.iter().flatten().map(|s| s.to_string()).collect();
+        names.sort_by(|a, b| {
+            if a == b {
+                std::cmp::Ordering::Equal
+            } else if a == "origin" {
+                std::cmp::Ordering::Less
+            } else if b == "origin" {
+                std::cmp::Ordering::Greater
+            } else {
+                a.cmp(b)
+            }
+        });
+        Ok(names)
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 推送（set_upstream 时可指定目标 remote，缺省 origin）
 #[tauri::command]
 pub async fn git_push(
     project_path: String,
     set_upstream: bool,
     branch: Option<String>,
+    remote: Option<String>,
 ) -> Result<String, String> {
     if set_upstream {
         let b = branch.clone().ok_or_else(|| "empty_branch".to_string())?;
         validate_branch_name(&b)?;
     }
+    let remote_name = remote.unwrap_or_else(|| "origin".to_string());
+    // remote 名白名单校验，防参数注入
+    if remote_name.is_empty()
+        || remote_name.starts_with('-')
+        || !remote_name.chars().all(|c| c.is_alphanumeric() || "-_./".contains(c))
+    {
+        return Err("invalid_remote".to_string());
+    }
     tokio::task::spawn_blocking(move || {
         if set_upstream {
             let b = branch.unwrap();
-            run_git_cli(&project_path, &["push", "-u", "origin", &b])
+            run_git_cli(&project_path, &["push", "-u", &remote_name, &b])
         } else {
             run_git_cli(&project_path, &["push"])
         }

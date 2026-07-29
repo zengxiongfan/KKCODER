@@ -5064,6 +5064,21 @@ input:checked + .switch-slider:before {
   align-items: center;
 }
 
+/* 同步更改 / 发布分支：VSCode Sync Changes 同款蓝，与提交绿区分动作语义 */
+.git-commit-btn.sync,
+.git-commit-btn.publish {
+  background: #2563eb;
+}
+
+.git-commit-btn.sync:hover:not(:disabled),
+.git-commit-btn.publish:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.git-commit-btn svg.spinning {
+  animation: git-spin 1s linear infinite;
+}
+
 .git-commit-menu {
   right: 0;
   bottom: 100%;

@@ -4337,6 +4337,7 @@ pub fn run() {
             commands::git::git_commit_paths,
             commands::git::git_branch_status,
             commands::git::git_fetch,
+            commands::git::git_list_remotes,
             commands::git::git_push,
             commands::git::git_pull,
             commands::git::git_pull_abort,

@@ -592,7 +592,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const [pulling, setPulling] = useState(false);
   const [fetching, setFetching] = useState(false);
 
-  // 底部状态行：分支下拉切换 / 提交模式分裂按钮 / 无上游推送确认
+  // 底部状态行：分支下拉切换 / 提交模式分裂按钮 / 发布分支 remote 选择
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchList, setBranchList] = useState<GitLocalBranch[]>([]);
   const [branchFilter, setBranchFilter] = useState("");
@@ -601,7 +601,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     localStorage.getItem("kkcoder_git_commit_mode") === "commit-push" ? "commit-push" : "commit"
   );
   const [commitMenuOpen, setCommitMenuOpen] = useState(false);
-  const [pushConfirm, setPushConfirm] = useState(false);
+  const [publishMenuOpen, setPublishMenuOpen] = useState(false);
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const [publishRemote, setPublishRemote] = useState<string>(
+    () => localStorage.getItem("kkcoder_git_publish_remote") || ""
+  );
+  const [syncing, setSyncing] = useState(false);
   const [pullStrategy, setPullStrategy] = useState<string>(
     () => localStorage.getItem("kkcoder_git_pull_strategy") || "merge"
   );
@@ -1006,6 +1011,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
         projectPath: repoPath,
         setUpstream: !upstream,
         branch: branchStatus?.branch ?? null,
+        remote: !upstream && publishRemote ? publishRemote : null,
       });
       await refresh();
     } catch (e) {
@@ -1016,13 +1022,80 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     }
   };
 
-  // 无上游分支时先弹确认（将执行 push -u origin，需用户知情推送目标）
-  const requestPush = () => {
+  // 无上游分支：发布到指定 remote（push -u <remote> <branch>）并记忆选择
+  const handlePublish = async (remote: string) => {
+    setPublishMenuOpen(false);
+    if (pushing || !branchStatus?.branch) return;
+    setPublishRemote(remote);
+    localStorage.setItem("kkcoder_git_publish_remote", remote);
+    setPushing(true);
+    try {
+      await invoke("git_push", {
+        projectPath: repoPath,
+        setUpstream: true,
+        branch: branchStatus.branch,
+        remote,
+      });
+      await refresh();
+    } catch (e) {
+      console.error("发布分支失败:", e);
+      setError(formatGitError(String(e)));
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  // 打开发布菜单时懒加载 remote 列表
+  const openPublishMenu = async () => {
+    if (publishMenuOpen) {
+      setPublishMenuOpen(false);
+      return;
+    }
+    setPublishMenuOpen(true);
+    try {
+      const list = await invoke<string[]>("git_list_remotes", { projectPath: repoPath });
+      setRemotes(list);
+    } catch {
+      setRemotes([]);
+    }
+  };
+
+  // 发布入口：有记忆 remote 直接发布，首次则弹 remote 选择菜单
+  const requestPublish = () => {
     if (pushing || committing) return;
-    if (branchStatus && !branchStatus.has_upstream && branchStatus.branch) {
-      setPushConfirm(true);
+    if (publishRemote) {
+      void handlePublish(publishRemote);
     } else {
-      void doPush();
+      void openPublishMenu();
+    }
+  };
+
+  // 同步更改（VSCode Sync Changes）：先拉后推，无弹窗
+  const handleSync = async () => {
+    if (syncing || pushing || pulling || !branchStatus) return;
+    setSyncing(true);
+    try {
+      if (branchStatus.behind > 0) {
+        await invoke("git_pull", { projectPath: repoPath, strategy: pullStrategy });
+      }
+      if (branchStatus.ahead > 0) {
+        await invoke("git_push", {
+          projectPath: repoPath,
+          setUpstream: false,
+          branch: null,
+          remote: null,
+        });
+      }
+      await refresh();
+    } catch (e) {
+      const msg = String(e);
+      console.error("同步更改失败:", e);
+      if (msg.includes("pull_conflict")) {
+        await refresh();
+      }
+      setError(formatGitError(msg));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -1030,7 +1103,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const runCommitAction = async () => {
     const ok = await handleCommit();
     if (ok && commitMode === "commit-push") {
-      requestPush();
+      if (branchStatus?.has_upstream) {
+        void doPush();
+      } else if (branchStatus?.branch) {
+        requestPublish();
+      }
     }
   };
 
@@ -1544,57 +1621,129 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             )}
           </span>
         </div>
-        <div className="git-commit-split git-dropdown-wrapper">
-          <button
-            className="git-commit-btn main"
-            onClick={() => void runCommitAction()}
-            disabled={committing || pushing || committableCount === 0 || commitMsg.trim().length === 0}
-          >
-            <GitCommitHorizontal size={12} />
-            {committing
-              ? "提交中..."
-              : commitMode === "commit-push"
-                ? `提交并推送 (${committableCount})`
-                : `提交 (${committableCount})`}
-          </button>
-          <button
-            className="git-commit-btn caret"
-            onClick={() => setCommitMenuOpen(!commitMenuOpen)}
-            disabled={committing}
-            title="切换提交方式"
-          >
-            <ChevronDown size={11} />
-          </button>
-          {commitMenuOpen && (
-            <>
-              <div className="git-dropdown-overlay" onClick={() => setCommitMenuOpen(false)} />
-              <div className="git-dropdown-menu git-commit-menu">
-                <button
-                  className={`git-dropdown-item ${commitMode === "commit" ? "active" : ""}`}
-                  onClick={() => {
-                    setCommitMode("commit");
-                    localStorage.setItem("kkcoder_git_commit_mode", "commit");
-                    setCommitMenuOpen(false);
-                  }}
-                >
-                  <span>提交</span>
-                  {commitMode === "commit" && <Check size={11} />}
-                </button>
-                <button
-                  className={`git-dropdown-item ${commitMode === "commit-push" ? "active" : ""}`}
-                  onClick={() => {
-                    setCommitMode("commit-push");
-                    localStorage.setItem("kkcoder_git_commit_mode", "commit-push");
-                    setCommitMenuOpen(false);
-                  }}
-                >
-                  <span>提交并推送</span>
-                  {commitMode === "commit-push" && <Check size={11} />}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {allCount > 0 || !branchStatus || branchStatus.detached ? (
+          /* 态一：有变更 → 提交分裂按钮 */
+          <div className="git-commit-split git-dropdown-wrapper">
+            <button
+              className="git-commit-btn main"
+              onClick={() => void runCommitAction()}
+              disabled={committing || pushing || committableCount === 0 || commitMsg.trim().length === 0}
+            >
+              <GitCommitHorizontal size={12} />
+              {committing
+                ? "提交中..."
+                : commitMode === "commit-push"
+                  ? `提交并推送 (${committableCount})`
+                  : `提交 (${committableCount})`}
+            </button>
+            <button
+              className="git-commit-btn caret"
+              onClick={() => setCommitMenuOpen(!commitMenuOpen)}
+              disabled={committing}
+              title="切换提交方式"
+            >
+              <ChevronDown size={11} />
+            </button>
+            {commitMenuOpen && (
+              <>
+                <div className="git-dropdown-overlay" onClick={() => setCommitMenuOpen(false)} />
+                <div className="git-dropdown-menu git-commit-menu">
+                  <button
+                    className={`git-dropdown-item ${commitMode === "commit" ? "active" : ""}`}
+                    onClick={() => {
+                      setCommitMode("commit");
+                      localStorage.setItem("kkcoder_git_commit_mode", "commit");
+                      setCommitMenuOpen(false);
+                    }}
+                  >
+                    <span>提交</span>
+                    {commitMode === "commit" && <Check size={11} />}
+                  </button>
+                  <button
+                    className={`git-dropdown-item ${commitMode === "commit-push" ? "active" : ""}`}
+                    onClick={() => {
+                      setCommitMode("commit-push");
+                      localStorage.setItem("kkcoder_git_commit_mode", "commit-push");
+                      setCommitMenuOpen(false);
+                    }}
+                  >
+                    <span>提交并推送</span>
+                    {commitMode === "commit-push" && <Check size={11} />}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : !branchStatus.has_upstream && branchStatus.branch ? (
+          /* 态二：工作区干净 + 无上游 → 发布分支（remote 可选可记忆） */
+          <div className="git-commit-split git-dropdown-wrapper">
+            <button
+              className="git-commit-btn main publish"
+              onClick={requestPublish}
+              disabled={pushing}
+              title={publishRemote ? `git push -u ${publishRemote} ${branchStatus.branch}` : "选择要发布到的远程"}
+            >
+              <Upload size={12} className={pushing ? "spinning" : ""} />
+              {pushing
+                ? "发布中..."
+                : publishRemote
+                  ? `发布分支到 ${publishRemote}`
+                  : "发布分支"}
+            </button>
+            <button
+              className="git-commit-btn caret"
+              onClick={() => void openPublishMenu()}
+              disabled={pushing}
+              title="选择发布目标远程"
+            >
+              <ChevronDown size={11} />
+            </button>
+            {publishMenuOpen && (
+              <>
+                <div className="git-dropdown-overlay" onClick={() => setPublishMenuOpen(false)} />
+                <div className="git-dropdown-menu git-commit-menu">
+                  {remotes.length === 0 ? (
+                    <div className="git-branch-menu-empty">未配置远程仓库</div>
+                  ) : (
+                    remotes.map((r) => (
+                      <button
+                        key={r}
+                        className={`git-dropdown-item ${publishRemote === r ? "active" : ""}`}
+                        onClick={() => void handlePublish(r)}
+                      >
+                        <span>发布到 {r}</span>
+                        {publishRemote === r && <Check size={11} />}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        ) : branchStatus.ahead > 0 || branchStatus.behind > 0 ? (
+          /* 态三：干净 + 有上游 + 待同步 → 同步更改（先拉后推，无弹窗） */
+          <div className="git-commit-split">
+            <button
+              className="git-commit-btn main sync"
+              onClick={() => void handleSync()}
+              disabled={syncing || pushing || pulling}
+              title={`同步到 ${branchStatus.upstream ?? "上游"}${branchStatus.ahead > 0 ? ` · 推送 ${branchStatus.ahead} 个提交` : ""}${branchStatus.behind > 0 ? ` · 拉取 ${branchStatus.behind} 个提交` : ""}`}
+            >
+              <RefreshCw size={12} className={syncing ? "spinning" : ""} />
+              {syncing
+                ? "同步中..."
+                : `同步更改${branchStatus.ahead > 0 ? ` ${branchStatus.ahead}↑` : ""}${branchStatus.behind > 0 ? ` ${branchStatus.behind}↓` : ""}`}
+            </button>
+          </div>
+        ) : (
+          /* 态四：干净且已同步 → 置灰 */
+          <div className="git-commit-split">
+            <button className="git-commit-btn main" disabled>
+              <Check size={12} />
+              已是最新
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── 底部状态行：分支切换 + 同步图标组（常驻） ── */}
@@ -1768,9 +1917,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             </div>
             <button
               className="git-sync-icon-btn"
-              onClick={requestPush}
+              onClick={() => (branchStatus.has_upstream ? void doPush() : requestPublish())}
               disabled={pushing || committing || fetching || branchStatus.detached || !branchStatus.branch}
-              title={branchStatus.has_upstream ? "推送 (Push)" : "推送并创建上游 (Push -u)"}
+              title={branchStatus.has_upstream ? "推送 (Push)" : publishRemote ? `发布分支到 ${publishRemote}` : "发布分支（选择远程）"}
             >
               <Upload size={13} className={pushing ? "spinning" : ""} />
               {branchStatus.ahead > 0 && <span className="git-sync-num">{branchStatus.ahead}</span>}
@@ -1822,23 +1971,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                 handleDiscardFile(discardTarget.path, discardTarget.status);
                 setDiscardTarget(null);
               }}>确认丢弃</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── 无上游推送确认弹窗 ── */}
-      {pushConfirm && (
-        <div className="git-confirm-overlay" onClick={() => setPushConfirm(false)}>
-          <div className="git-confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="git-confirm-title">推送到新的上游分支？</div>
-            <div className="git-confirm-desc">
-              当前分支 {branchStatus?.branch} 没有上游，将执行 git push -u origin {branchStatus?.branch}。
-              若需推送到其他远程（如 fork），请先在终端手动设置上游。
-            </div>
-            <div className="git-confirm-actions">
-              <button className="git-btn cancel" onClick={() => setPushConfirm(false)}>取消</button>
-              <button className="git-btn danger" onClick={() => { setPushConfirm(false); void doPush(); }}>确认推送到 origin</button>
             </div>
           </div>
         </div>
