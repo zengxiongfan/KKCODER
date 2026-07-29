@@ -1184,6 +1184,16 @@ pub async fn git_branch_status(project_path: String) -> Result<GitBranchStatus, 
     .map_err(|e| format!("task_failed: {e}"))?
 }
 
+/// 从所有远程获取更新（只更新远程跟踪引用，不碰工作区）
+#[tauri::command]
+pub async fn git_fetch(project_path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        run_git_cli(&project_path, &["fetch", "--all", "--prune"])
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
 /// 推送
 #[tauri::command]
 pub async fn git_push(

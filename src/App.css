@@ -5038,6 +5038,306 @@ input:checked + .switch-slider:before {
   top: auto;
 }
 
+/* ==================== 提交面板底部重构：分裂提交按钮 + 状态行 ==================== */
+
+/* 分裂提交按钮（主按钮 + 模式切换箭头） */
+.git-commit-split {
+  display: flex;
+  margin-top: 5px;
+}
+
+.git-commit-btn.main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-radius: 4px 0 0 4px;
+}
+
+.git-commit-btn.caret {
+  padding: 6px 6px;
+  border-radius: 0 4px 4px 0;
+  border-left: 1px solid rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+}
+
+.git-commit-menu {
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  top: auto;
+}
+
+/* 底部状态行：分支胶囊 + 同步角标 + 图标组 */
+.git-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px; /* 与左侧主窗口底部状态栏 .bottom-panel 等高，上边框精确对齐 */
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.git-branch-chip-wrapper {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.git-branch-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.1));
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.git-branch-chip:hover:not(:disabled) {
+  background: var(--bg-active-item, rgba(148, 163, 184, 0.18));
+}
+
+.git-branch-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.git-branch-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+/* 分支下拉（朝上弹出，带搜索与最近提交时间） */
+.git-branch-menu {
+  left: 0;
+  right: auto;
+  bottom: 100%;
+  top: auto;
+  margin-bottom: 4px;
+  min-width: 260px;
+  max-width: 340px;
+  padding: 4px;
+}
+
+.git-branch-menu-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-terminal, rgba(0, 0, 0, 0.2));
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  outline: none;
+}
+
+.git-branch-menu-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.git-branch-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+/* 分组头（对齐分支面板 .branch-group-header 视觉：图标 + 标题 + 数量徽章） */
+.git-branch-menu-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.git-branch-menu-group-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 本地分支行的上游指向（对齐 .branch-row-upstream），同样需压过全局 span flex:1 */
+.git-branch-menu-item .git-branch-menu-upstream {
+  flex: 0 1 auto;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.git-branch-menu-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+/* 以下三条均需压过全局 .git-dropdown-item span { flex:1 }，否则勾选列/时间列会被拉伸出大片空白 */
+.git-branch-menu-item .git-branch-menu-check {
+  flex: 0 0 12px;
+  width: 12px;
+  display: inline-flex;
+  color: var(--color-green, #22c55e);
+}
+
+/* 覆盖全局 .git-dropdown-item span { flex:1 }：分支名只占内容宽度，不拉开与勾选的间距 */
+.git-branch-menu-item .git-branch-menu-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.git-branch-menu-item .git-branch-menu-time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.git-branch-menu-empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+/* 同步状态角标：默认弱化，有数量时亮起 */
+.git-sync-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.git-sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  opacity: 0.45;
+}
+
+.git-sync-badge.lit.behind {
+  color: #60a5fa;
+  opacity: 1;
+}
+
+.git-sync-badge.lit.ahead {
+  color: #4ade80;
+  opacity: 1;
+}
+
+/* Fetch / Pull / Push 图标组 */
+.git-sync-icons {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.git-sync-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.git-sync-icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
+  color: var(--text-primary);
+}
+
+.git-sync-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.git-sync-icon-btn svg.spinning {
+  animation: git-spin 1s linear infinite;
+}
+
+.git-sync-num {
+  position: absolute;
+  top: -3px;
+  right: -2px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  box-sizing: border-box;
+  font-size: 8.5px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  color: #fff;
+  background: var(--color-orange, #f97316);
+  border-radius: 6px;
+}
+
+.git-pull-split {
+  display: inline-flex;
+  align-items: center;
+}
+
+.git-sync-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.git-sync-caret:hover:not(:disabled) {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
+  color: var(--text-primary);
+}
+
 .git-btn.continue {
   background: rgba(34, 197, 94, 0.15);
   border-color: rgba(34, 197, 94, 0.3);
@@ -5122,12 +5422,12 @@ input:checked + .switch-slider:before {
 .git-commit-input {
   width: 100%;
   box-sizing: border-box;
-  min-height: 32px;
-  max-height: 80px;
+  min-height: 76px; /* 加大提交信息录入区，与 VSCode 提交框观感对齐 */
+  max-height: 160px;
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid var(--border-color);
   border-radius: 5px;
-  padding: 4px 6px;
+  padding: 6px 8px;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-primary);

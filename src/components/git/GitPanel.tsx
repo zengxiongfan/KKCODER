@@ -32,6 +32,8 @@ import {
   FolderOpen,
   FileText,
   Folder,
+  Cloud,
+  HardDrive,
 } from "lucide-react";
 import { DiffViewerModal } from "./DiffViewerModal";
 import { FileIcon } from "../../utils/fileIcons";
@@ -69,6 +71,15 @@ interface GitRepoInfo {
   relativePath: string;
   absolutePath: string;
   branch: string | null;
+}
+
+// 分支下拉项（复用 git_list_branches，本地 + 远程分组展示，样式对齐分支面板）
+interface GitLocalBranch {
+  name: string;
+  isRemote: boolean;
+  isCurrent: boolean;
+  upstream: string | null;
+  lastCommit: { timestamp: number } | null;
 }
 
 interface GitTreeNode {
@@ -123,6 +134,24 @@ function formatGitError(raw: string): string {
 function isUntracked(status: string): boolean {
   return status === "U" || status === "??";
 }
+
+// 分支下拉里的相对时间（与 BranchPanel 展示口径一致）
+function formatRelativeTime(timestamp: number): string {
+  const now = Math.floor(Date.now() / 1000);
+  const diff = now - timestamp;
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`;
+  if (diff < 86400 * 365) return `${Math.floor(diff / (86400 * 30))} 个月前`;
+  return `${Math.floor(diff / (86400 * 365))} 年前`;
+}
+
+const PULL_STRATEGY_LABELS: Record<string, string> = {
+  merge: "Merge",
+  rebase: "Rebase",
+  "ff-only": "FF-only",
+};
 
 function collectFileChanges(node: GitTreeNode): GitFileChange[] {
   if (!node.isDir) return node.change ? [node.change] : [];
@@ -561,6 +590,21 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const [committing, setCommitting] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [fetching, setFetching] = useState(false);
+
+  // 底部状态行：分支下拉切换 / 提交模式分裂按钮 / 无上游推送确认
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchList, setBranchList] = useState<GitLocalBranch[]>([]);
+  const [branchFilter, setBranchFilter] = useState("");
+  const [switchingBranch, setSwitchingBranch] = useState(false);
+  const [commitMode, setCommitMode] = useState<"commit" | "commit-push">(() =>
+    localStorage.getItem("kkcoder_git_commit_mode") === "commit-push" ? "commit-push" : "commit"
+  );
+  const [commitMenuOpen, setCommitMenuOpen] = useState(false);
+  const [pushConfirm, setPushConfirm] = useState(false);
+  const [pullStrategy, setPullStrategy] = useState<string>(
+    () => localStorage.getItem("kkcoder_git_pull_strategy") || "merge"
+  );
 
   const [commitMsg, setCommitMsg] = useState("");
   const [diffFile, setDiffFile] = useState<{ path: string; status: string } | null>(null);
@@ -919,9 +963,9 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     }
   };
 
-  const handleCommit = async () => {
+  const handleCommit = async (): Promise<boolean> => {
     const msg = commitMsg.trim();
-    if (!msg || committableCount === 0 || committing) return;
+    if (!msg || committableCount === 0 || committing) return false;
     setCommitting(true);
     try {
       // 先暂存选中的未跟踪文件
@@ -944,15 +988,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
       setSelectedUntracked(new Set());
       setDeselectedAdded(new Set());
       await refresh();
+      return true;
     } catch (e) {
       console.error("提交失败:", e);
       setError(formatGitError(String(e)));
+      return false;
     } finally {
       setCommitting(false);
     }
   };
 
-  const handlePush = async () => {
+  const doPush = async () => {
     setPushing(true);
     try {
       const upstream = branchStatus?.has_upstream;
@@ -970,8 +1016,79 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     }
   };
 
+  // 无上游分支时先弹确认（将执行 push -u origin，需用户知情推送目标）
+  const requestPush = () => {
+    if (pushing || committing) return;
+    if (branchStatus && !branchStatus.has_upstream && branchStatus.branch) {
+      setPushConfirm(true);
+    } else {
+      void doPush();
+    }
+  };
+
+  // 提交主按钮：按记忆模式执行 提交 / 提交并推送
+  const runCommitAction = async () => {
+    const ok = await handleCommit();
+    if (ok && commitMode === "commit-push") {
+      requestPush();
+    }
+  };
+
+  const handleFetch = async () => {
+    if (fetching) return;
+    setFetching(true);
+    try {
+      await invoke("git_fetch", { projectPath: repoPath });
+      await Promise.all([fetchChanges(true), fetchBranchStatus()]);
+    } catch (e) {
+      console.error("获取更新失败:", e);
+      setError(formatGitError(String(e)));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  // 打开分支下拉时懒加载分支列表（本地 + 远程，过滤掉 origin/HEAD 指针）
+  const handleOpenBranchMenu = async () => {
+    if (branchMenuOpen) {
+      setBranchMenuOpen(false);
+      return;
+    }
+    setBranchFilter("");
+    setBranchMenuOpen(true);
+    try {
+      const list = await invoke<GitLocalBranch[]>("git_list_branches", { projectPath: repoPath });
+      setBranchList(list.filter((b) => !b.name.endsWith("/HEAD")));
+    } catch {
+      setBranchList([]);
+    }
+  };
+
+  const handleCheckoutBranch = async (name: string, isCurrent: boolean, isRemote: boolean) => {
+    setBranchMenuOpen(false);
+    if (isCurrent || switchingBranch) return;
+    setSwitchingBranch(true);
+    try {
+      await invoke("git_checkout_branch", { projectPath: repoPath, branch: name, isRemote });
+      await refresh();
+    } catch (e) {
+      const msg = String(e);
+      let friendly = msg;
+      if (msg.includes("would be overwritten") || msg.includes("local changes")) {
+        friendly = "切换失败：工作区有未提交的更改，请先提交或暂存";
+      } else if (msg.startsWith("git_failed:")) {
+        friendly = msg.replace(/^git_failed:\s*/, "").slice(0, 200);
+      }
+      setError(friendly);
+    } finally {
+      setSwitchingBranch(false);
+    }
+  };
+
   const handlePull = async (strategy: string) => {
     setPullMenuOpen(false);
+    setPullStrategy(strategy);
+    localStorage.setItem("kkcoder_git_pull_strategy", strategy);
     setPulling(true);
     try {
       await invoke("git_pull", { projectPath: repoPath, strategy });
@@ -1350,79 +1467,6 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
         )}
       </div>
 
-      {/* ── 分支状态栏 ── */}
-      {branchStatus && (branchStatus.branch || branchStatus.detached) && (
-        <div className="git-branch-bar">
-          <div className="branch-info">
-            <GitBranch size={12} className="branch-icon" />
-            <span>{branchStatus.detached ? "detached HEAD" : `${activeRepoLabel}/${branchStatus.branch}`}</span>
-            {!branchStatus.detached && branchStatus.has_upstream && (
-              <>
-                {branchStatus.ahead > 0 && (
-                  <span className="branch-ahead"><ArrowUp size={10} />{branchStatus.ahead}</span>
-                )}
-                {branchStatus.behind > 0 && (
-                  <span className="branch-behind"><ArrowDown size={10} />{branchStatus.behind}</span>
-                )}
-              </>
-            )}
-            {!branchStatus.detached && branchStatus.branch && !branchStatus.has_upstream && (
-              <span className="branch-no-upstream">无上游</span>
-            )}
-          </div>
-          <div className="git-branch-actions">
-            {!branchStatus.detached && branchStatus.has_upstream && branchStatus.behind > 0 && (
-              <div className="git-dropdown-wrapper">
-                <button
-                  className="git-btn pull"
-                  onClick={() => handlePull("merge")}
-                  disabled={pulling}
-                >
-                  <Download size={11} />
-                  {pulling ? "拉取中..." : `拉取 ${branchStatus.behind}`}
-                </button>
-                <button
-                  className="git-btn pull-menu-toggle"
-                  onClick={() => setPullMenuOpen(!pullMenuOpen)}
-                  disabled={pulling}
-                >
-                  <ChevronDown size={10} />
-                </button>
-                {pullMenuOpen && (
-                  <>
-                    <div className="git-dropdown-overlay" onClick={() => setPullMenuOpen(false)} />
-                    <div className="git-dropdown-menu pull-menu">
-                      <button className="git-dropdown-item" onClick={() => handlePull("merge")}>
-                        <span>Merge</span>
-                        <span className="git-menu-desc">合并提交</span>
-                      </button>
-                      <button className="git-dropdown-item" onClick={() => handlePull("rebase")}>
-                        <span>Rebase</span>
-                        <span className="git-menu-desc">变基</span>
-                      </button>
-                      <button className="git-dropdown-item" onClick={() => handlePull("ff-only")}>
-                        <span>Fast-forward only</span>
-                        <span className="git-menu-desc">仅快进</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-            {!branchStatus.detached && branchStatus.branch && (branchStatus.ahead > 0 || !branchStatus.has_upstream) && (
-              <button
-                className="git-btn push"
-                onClick={handlePush}
-                disabled={pushing}
-              >
-                <Upload size={11} />
-                {pushing ? "推送中..." : branchStatus.ahead > 0 ? `推送 ${branchStatus.ahead}` : "推送"}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── 冲突横幅 ── */}
       {(pendingOp || hasConflicts) && (
         <div className="git-conflict-banner">
@@ -1467,38 +1511,269 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
         </div>
       )}
 
-      {/* ── 提交栏 ── */}
-      {changes.length > 0 && (
-        <div className="git-commit-bar">
-          <textarea
-            className="git-commit-input"
-            placeholder={committableCount > 0 ? "提交信息 (Ctrl+Enter 提交)" : "无待提交文件"}
-            value={commitMsg}
-            onChange={(e) => setCommitMsg(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                e.preventDefault();
-                handleCommit();
-              }
-            }}
-            rows={2}
-          />
-          <div className="git-commit-row">
-            <span className="git-commit-count">
-              {committableCount > 0
+      {/* ── 提交区（常驻） ── */}
+      <div className="git-commit-bar">
+        <textarea
+          className="git-commit-input"
+          placeholder={
+            allCount === 0
+              ? "工作区干净，无更改"
+              : committableCount > 0
+                ? "提交信息 (Ctrl+Enter 提交)"
+                : "无待提交文件"
+          }
+          value={commitMsg}
+          onChange={(e) => setCommitMsg(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+              e.preventDefault();
+              void runCommitAction();
+            }
+          }}
+          rows={4}
+        />
+        <div className="git-commit-row">
+          <span className="git-commit-count">
+            {allCount === 0
+              ? "工作区干净"
+              : committableCount > 0
                 ? `${committableCount} 个文件待提交`
                 : "无暂存文件"}
-              {selectedUntrackedCount > 0 && (
-                <span className="git-commit-untracked">包含 {selectedUntrackedCount} 个未跟踪文件</span>
-              )}
-            </span>
+            {selectedUntrackedCount > 0 && (
+              <span className="git-commit-untracked">包含 {selectedUntrackedCount} 个未跟踪文件</span>
+            )}
+          </span>
+        </div>
+        <div className="git-commit-split git-dropdown-wrapper">
+          <button
+            className="git-commit-btn main"
+            onClick={() => void runCommitAction()}
+            disabled={committing || pushing || committableCount === 0 || commitMsg.trim().length === 0}
+          >
+            <GitCommitHorizontal size={12} />
+            {committing
+              ? "提交中..."
+              : commitMode === "commit-push"
+                ? `提交并推送 (${committableCount})`
+                : `提交 (${committableCount})`}
+          </button>
+          <button
+            className="git-commit-btn caret"
+            onClick={() => setCommitMenuOpen(!commitMenuOpen)}
+            disabled={committing}
+            title="切换提交方式"
+          >
+            <ChevronDown size={11} />
+          </button>
+          {commitMenuOpen && (
+            <>
+              <div className="git-dropdown-overlay" onClick={() => setCommitMenuOpen(false)} />
+              <div className="git-dropdown-menu git-commit-menu">
+                <button
+                  className={`git-dropdown-item ${commitMode === "commit" ? "active" : ""}`}
+                  onClick={() => {
+                    setCommitMode("commit");
+                    localStorage.setItem("kkcoder_git_commit_mode", "commit");
+                    setCommitMenuOpen(false);
+                  }}
+                >
+                  <span>提交</span>
+                  {commitMode === "commit" && <Check size={11} />}
+                </button>
+                <button
+                  className={`git-dropdown-item ${commitMode === "commit-push" ? "active" : ""}`}
+                  onClick={() => {
+                    setCommitMode("commit-push");
+                    localStorage.setItem("kkcoder_git_commit_mode", "commit-push");
+                    setCommitMenuOpen(false);
+                  }}
+                >
+                  <span>提交并推送</span>
+                  {commitMode === "commit-push" && <Check size={11} />}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── 底部状态行：分支切换 + 同步图标组（常驻） ── */}
+      {branchStatus && (branchStatus.branch || branchStatus.detached) && (
+        <div className="git-status-line">
+          <div className="git-dropdown-wrapper git-branch-chip-wrapper">
             <button
-              className="git-commit-btn"
-              onClick={handleCommit}
-              disabled={committing || committableCount === 0 || commitMsg.trim().length === 0}
+              className="git-branch-chip"
+              onClick={() => void handleOpenBranchMenu()}
+              disabled={switchingBranch || branchStatus.detached}
+              title={branchStatus.detached ? "detached HEAD" : `${activeRepoLabel}/${branchStatus.branch}（点击切换分支）`}
             >
-              <GitCommitHorizontal size={12} />
-              {committing ? "提交中..." : `提交 (${committableCount})`}
+              <GitBranch size={11} />
+              <span className="git-branch-chip-name">
+                {switchingBranch ? "切换中..." : branchStatus.detached ? "detached" : branchStatus.branch}
+              </span>
+              <ChevronDown size={9} />
+            </button>
+            {branchMenuOpen && (
+              <>
+                <div className="git-dropdown-overlay" onClick={() => setBranchMenuOpen(false)} />
+                <div className="git-dropdown-menu git-branch-menu">
+                  <input
+                    type="text"
+                    className="git-branch-menu-search"
+                    placeholder="搜索分支..."
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value)}
+                    autoFocus
+                  />
+                  <div className="git-branch-menu-list">
+                    {(() => {
+                      const kw = branchFilter.trim().toLowerCase();
+                      const filtered = branchList.filter((b) => !kw || b.name.toLowerCase().includes(kw));
+                      const locals = filtered.filter((b) => !b.isRemote);
+                      const remotes = filtered.filter((b) => b.isRemote);
+                      // 远程按 remote 名分组：origin 置顶，其余字母序（与分支面板一致）
+                      const remoteGroups = new Map<string, GitLocalBranch[]>();
+                      for (const b of remotes) {
+                        const slash = b.name.indexOf("/");
+                        const remoteName = slash > 0 ? b.name.slice(0, slash) : "未知";
+                        const list = remoteGroups.get(remoteName);
+                        if (list) list.push(b);
+                        else remoteGroups.set(remoteName, [b]);
+                      }
+                      const sortedGroups = Array.from(remoteGroups.entries()).sort(([a], [b]) => {
+                        if (a === b) return 0;
+                        if (a === "origin") return -1;
+                        if (b === "origin") return 1;
+                        return a.localeCompare(b);
+                      });
+                      const showRemoteName = sortedGroups.length > 1;
+                      const renderItem = (b: GitLocalBranch) => (
+                        <button
+                          key={b.name}
+                          className={`git-dropdown-item git-branch-menu-item ${b.isCurrent ? "active" : ""}`}
+                          onClick={() => void handleCheckoutBranch(b.name, b.isCurrent, b.isRemote)}
+                          title={b.isRemote ? `检出 ${b.name}（自动创建本地跟踪分支）` : b.name}
+                        >
+                          <span className="git-branch-menu-check">{b.isCurrent ? <Check size={11} /> : null}</span>
+                          <GitBranch size={10} className="git-branch-menu-icon" />
+                          <span className="git-branch-menu-name">{b.name}</span>
+                          {!b.isRemote && b.upstream && (
+                            <span className="git-branch-menu-upstream">→ {b.upstream}</span>
+                          )}
+                          {b.lastCommit && (
+                            <span className="git-branch-menu-time">{formatRelativeTime(b.lastCommit.timestamp)}</span>
+                          )}
+                        </button>
+                      );
+                      return (
+                        <>
+                          <div className="git-branch-menu-group">
+                            <HardDrive size={10} className="branch-group-icon" />
+                            <span className="git-branch-menu-group-label">本地分支</span>
+                            <span className="branch-group-count">{locals.length}</span>
+                          </div>
+                          {locals.length > 0 ? (
+                            locals.map(renderItem)
+                          ) : (
+                            <div className="git-branch-menu-empty">无本地分支</div>
+                          )}
+                          {sortedGroups.map(([remoteName, list]) => (
+                            <React.Fragment key={remoteName}>
+                              <div className="git-branch-menu-group">
+                                <Cloud size={10} className="branch-group-icon" />
+                                <span className="git-branch-menu-group-label">
+                                  远程分支
+                                  {showRemoteName && (
+                                    <>
+                                      <span className="branch-remote-sep">：</span>
+                                      <span className="branch-remote-name">{remoteName}</span>
+                                    </>
+                                  )}
+                                </span>
+                                <span className="branch-group-count">{list.length}</span>
+                              </div>
+                              {list.map(renderItem)}
+                            </React.Fragment>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {!branchStatus.detached && branchStatus.has_upstream ? (
+            <span className="git-sync-badges">
+              <span className={`git-sync-badge ${branchStatus.behind > 0 ? "lit behind" : ""}`}>
+                <ArrowDown size={10} />
+                {branchStatus.behind}
+              </span>
+              <span className={`git-sync-badge ${branchStatus.ahead > 0 ? "lit ahead" : ""}`}>
+                <ArrowUp size={10} />
+                {branchStatus.ahead}
+              </span>
+            </span>
+          ) : !branchStatus.detached ? (
+            <span className="branch-no-upstream">无上游</span>
+          ) : null}
+
+          <div className="git-sync-icons">
+            <button
+              className="git-sync-icon-btn"
+              onClick={() => void handleFetch()}
+              disabled={fetching || pulling || pushing}
+              title="从远程获取更新 (Fetch)"
+            >
+              <Cloud size={13} className={fetching ? "spinning" : ""} />
+            </button>
+            <div className="git-dropdown-wrapper git-pull-split">
+              <button
+                className="git-sync-icon-btn"
+                onClick={() => void handlePull(pullStrategy)}
+                disabled={pulling || fetching || branchStatus.detached || !branchStatus.has_upstream}
+                title={`拉取 Pull (${PULL_STRATEGY_LABELS[pullStrategy] || pullStrategy})`}
+              >
+                <Download size={13} className={pulling ? "spinning" : ""} />
+                {branchStatus.behind > 0 && <span className="git-sync-num">{branchStatus.behind}</span>}
+              </button>
+              <button
+                className="git-sync-caret"
+                onClick={() => setPullMenuOpen(!pullMenuOpen)}
+                disabled={pulling}
+                title="拉取策略"
+              >
+                <ChevronDown size={8} />
+              </button>
+              {pullMenuOpen && (
+                <>
+                  <div className="git-dropdown-overlay" onClick={() => setPullMenuOpen(false)} />
+                  <div className="git-dropdown-menu pull-menu">
+                    <button className="git-dropdown-item" onClick={() => handlePull("merge")}>
+                      <span>Merge</span>
+                      <span className="git-menu-desc">合并提交</span>
+                    </button>
+                    <button className="git-dropdown-item" onClick={() => handlePull("rebase")}>
+                      <span>Rebase</span>
+                      <span className="git-menu-desc">变基</span>
+                    </button>
+                    <button className="git-dropdown-item" onClick={() => handlePull("ff-only")}>
+                      <span>Fast-forward only</span>
+                      <span className="git-menu-desc">仅快进</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <button
+              className="git-sync-icon-btn"
+              onClick={requestPush}
+              disabled={pushing || committing || fetching || branchStatus.detached || !branchStatus.branch}
+              title={branchStatus.has_upstream ? "推送 (Push)" : "推送并创建上游 (Push -u)"}
+            >
+              <Upload size={13} className={pushing ? "spinning" : ""} />
+              {branchStatus.ahead > 0 && <span className="git-sync-num">{branchStatus.ahead}</span>}
             </button>
           </div>
         </div>
@@ -1547,6 +1822,23 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                 handleDiscardFile(discardTarget.path, discardTarget.status);
                 setDiscardTarget(null);
               }}>确认丢弃</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 无上游推送确认弹窗 ── */}
+      {pushConfirm && (
+        <div className="git-confirm-overlay" onClick={() => setPushConfirm(false)}>
+          <div className="git-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="git-confirm-title">推送到新的上游分支？</div>
+            <div className="git-confirm-desc">
+              当前分支 {branchStatus?.branch} 没有上游，将执行 git push -u origin {branchStatus?.branch}。
+              若需推送到其他远程（如 fork），请先在终端手动设置上游。
+            </div>
+            <div className="git-confirm-actions">
+              <button className="git-btn cancel" onClick={() => setPushConfirm(false)}>取消</button>
+              <button className="git-btn danger" onClick={() => { setPushConfirm(false); void doPush(); }}>确认推送到 origin</button>
             </div>
           </div>
         </div>
