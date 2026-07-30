@@ -4348,6 +4348,10 @@ pub fn run() {
             commands::git::git_list_branches,
             commands::git::git_list_branch_commits,
             commands::git::git_checkout_branch,
+            commands::git::git_create_branch,
+            commands::git::git_rename_branch,
+            commands::git::git_delete_branch,
+            commands::git::git_merge_branch,
             commands::git::git_commit_stat,
             commands::git::git_commit_files,
             commands::git::git_commit_file_diff

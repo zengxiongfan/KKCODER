@@ -25,9 +25,15 @@ import {
   FolderGit2,
   Copy,
   User,
+  Plus,
+  Pencil,
+  Trash2,
+  GitMerge,
+  ArrowRightLeft,
 } from "lucide-react";
 import { DiffViewerModal } from "./DiffViewerModal";
 import { FileIcon } from "../../utils/fileIcons";
+import { GitFetchIcon, RepoPullIcon } from "./codicons";
 
 // ─────────────────────────── 类型 ───────────────────────────
 
@@ -138,11 +144,13 @@ const BranchRow: React.FC<{
   selected: boolean;
   onSelect: () => void;
   onCheckout: () => void;
-}> = ({ branch, selected, onSelect, onCheckout }) => {
+  onContextMenu: (e: React.MouseEvent) => void;
+}> = ({ branch, selected, onSelect, onCheckout, onContextMenu }) => {
   return (
     <div
       className={`branch-row ${selected ? "selected" : ""} ${branch.isCurrent ? "current" : ""}`}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
       onDoubleClick={() => {
         if (!branch.isCurrent) onCheckout();
       }}
@@ -229,6 +237,19 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
   const [repositories, setRepositories] = useState<GitRepoInfo[]>([]);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
+
+  // ── 分支右键菜单 + 操作弹窗 ──
+  const [branchMenu, setBranchMenu] = useState<{ x: number; y: number; branch: GitBranchItem } | null>(null);
+  const [branchInput, setBranchInput] = useState<{ mode: "create" | "rename"; branch: GitBranchItem; value: string } | null>(null);
+  const [branchConfirm, setBranchConfirm] = useState<{ mode: "delete" | "merge"; branch: GitBranchItem; needForce: boolean } | null>(null);
+  const [branchOpBusy, setBranchOpBusy] = useState(false);
+
+  // ── Fetch / Pull（拉取策略与提交面板共享同一 localStorage） ──
+  const [fetching, setFetching] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [pullStrategy] = useState<string>(
+    () => localStorage.getItem("kkcoder_git_pull_strategy") || "merge"
+  );
 
   const projectPathRef = useRef(projectPath);
   const loadingRef = useRef(false);
@@ -481,6 +502,137 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     }
   };
 
+  // 当前分支（合并确认 / 拉取上游判断等场景用）
+  const currentBranch = useMemo(() => branches.find((b) => b.isCurrent) ?? null, [branches]);
+  const currentBranchName = currentBranch?.name ?? null;
+
+  // 右键分支 → 打开上下文菜单
+  const openBranchMenu = (e: React.MouseEvent, branch: GitBranchItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setBranchMenu({ x: e.clientX, y: e.clientY, branch });
+  };
+
+  // git 错误本地化（分支操作通用）
+  const localizeGitError = (msg: string): string => {
+    if (msg.includes("would be overwritten") || msg.includes("local changes")) {
+      return "工作区有未提交的更改，请先提交或暂存";
+    }
+    if (msg.includes("not fully merged")) {
+      return "分支存在未合并的提交";
+    }
+    if (msg.includes("pull_conflict") || msg.includes("conflict") || msg.includes("Automatic merge failed")) {
+      return "合并存在冲突，请在终端手动解决后提交";
+    }
+    if (msg.includes("already exists")) {
+      return "已存在同名分支";
+    }
+    if (msg.startsWith("git_failed:")) {
+      return msg.replace(/^git_failed:\s*/, "").slice(0, 200);
+    }
+    return msg;
+  };
+
+  const handleCopyBranchName = async (name: string) => {
+    await copyToClipboard(name);
+  };
+
+  // 新建 / 重命名 提交
+  const submitBranchInput = async () => {
+    if (!branchInput || branchOpBusy) return;
+    const name = branchInput.value.trim();
+    if (!name) return;
+    setBranchOpBusy(true);
+    setCheckoutError(null);
+    try {
+      if (branchInput.mode === "create") {
+        await invoke("git_create_branch", {
+          projectPath: repoPath,
+          branchName: name,
+          startPoint: branchInput.branch.name,
+          checkout: true,
+        });
+      } else {
+        await invoke("git_rename_branch", {
+          projectPath: repoPath,
+          oldName: branchInput.branch.name,
+          newName: name,
+        });
+      }
+      setBranchInput(null);
+      await fetchBranches(true);
+    } catch (e) {
+      setCheckoutError(localizeGitError(String(e)));
+    } finally {
+      setBranchOpBusy(false);
+    }
+  };
+
+  // 删除 / 合并 确认（本地删除未合并时转强制删除二次确认）
+  const submitBranchConfirm = async (force = false) => {
+    if (!branchConfirm || branchOpBusy) return;
+    setBranchOpBusy(true);
+    setCheckoutError(null);
+    try {
+      if (branchConfirm.mode === "delete") {
+        await invoke("git_delete_branch", {
+          projectPath: repoPath,
+          branchName: branchConfirm.branch.name,
+          isRemote: branchConfirm.branch.isRemote,
+          force,
+        });
+      } else {
+        await invoke("git_merge_branch", {
+          projectPath: repoPath,
+          branchName: branchConfirm.branch.name,
+        });
+      }
+      setBranchConfirm(null);
+      await fetchBranches(true);
+    } catch (e) {
+      const msg = String(e);
+      if (branchConfirm.mode === "delete" && !branchConfirm.branch.isRemote && msg.includes("not fully merged")) {
+        setBranchConfirm({ ...branchConfirm, needForce: true });
+      } else {
+        setCheckoutError(localizeGitError(msg));
+        setBranchConfirm(null);
+      }
+    } finally {
+      setBranchOpBusy(false);
+    }
+  };
+
+  // 从所有远程获取更新（不改工作区）→ 刷新分支列表与 ↑↓ 角标
+  const handleFetch = async () => {
+    if (fetching || pulling) return;
+    setFetching(true);
+    setCheckoutError(null);
+    try {
+      await invoke("git_fetch", { projectPath: repoPath });
+      await fetchBranches(true);
+    } catch (e) {
+      setCheckoutError(localizeGitError(String(e)));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  // 拉取当前分支（策略与提交面板共享）→ 刷新分支与当前选中分支的提交历史
+  const handlePull = async () => {
+    if (fetching || pulling) return;
+    setPulling(true);
+    setCheckoutError(null);
+    try {
+      await invoke("git_pull", { projectPath: repoPath, strategy: pullStrategy });
+      await fetchBranches(true);
+      if (selectedRef) fetchCommits(selectedRef, false);
+    } catch (e) {
+      setCheckoutError(localizeGitError(String(e)));
+    } finally {
+      setPulling(false);
+    }
+  };
+
   const handleLoadMoreCommits = () => {
     if (selectedRef && !commitsLoading && commitsHasMore) {
       fetchCommits(selectedRef, true);
@@ -605,6 +757,22 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
             <Search size={11} />
           </button>
           <button
+            className="git-action-btn"
+            onClick={() => void handleFetch()}
+            disabled={fetching || pulling}
+            title="从所有远程获取更新 (Fetch)"
+          >
+            <GitFetchIcon size={12} className={fetching ? "spinning" : ""} />
+          </button>
+          <button
+            className="git-action-btn"
+            onClick={() => void handlePull()}
+            disabled={pulling || fetching || !currentBranch?.upstream}
+            title={currentBranch?.upstream ? `拉取当前分支 ${currentBranch.name}（${pullStrategy}）` : "当前分支无上游，无法拉取"}
+          >
+            <RepoPullIcon size={12} className={pulling ? "spinning" : ""} />
+          </button>
+          <button
             className={`git-action-btn ${loading ? "spinning" : ""}`}
             onClick={() => fetchBranches(false)}
             title="刷新"
@@ -718,6 +886,7 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
                       selected={selectedRef === b.fullRef}
                       onSelect={() => setSelectedRef(b.fullRef)}
                       onCheckout={() => handleCheckout(b)}
+                      onContextMenu={(e) => openBranchMenu(e, b)}
                     />
                   ))
                 ))}
@@ -771,6 +940,7 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
                           selected={selectedRef === b.fullRef}
                           onSelect={() => setSelectedRef(b.fullRef)}
                           onCheckout={() => handleCheckout(b)}
+                          onContextMenu={(e) => openBranchMenu(e, b)}
                         />
                       ))}
                   </div>
@@ -987,6 +1157,167 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
           </div>
         );
       })()}
+
+      {/* 分支右键上下文菜单 */}
+      {branchMenu && (() => {
+        const b = branchMenu.branch;
+        const isCurrent = b.isCurrent;
+        const isRemote = b.isRemote;
+        const menuW = 224;
+        const menuH = 300;
+        const left = Math.min(branchMenu.x, window.innerWidth - menuW - 8);
+        const top = Math.min(branchMenu.y, window.innerHeight - menuH - 8);
+        return (
+          <>
+            <div
+              className="branch-menu-overlay"
+              onClick={() => setBranchMenu(null)}
+              onContextMenu={(e) => { e.preventDefault(); setBranchMenu(null); }}
+            />
+            <div className="branch-context-menu" style={{ left, top }}>
+              {!isCurrent && (
+                <button className="branch-menu-item" onClick={() => { setBranchMenu(null); handleCheckout(b); }}>
+                  <ArrowRightLeft size={13} />
+                  {isRemote ? "检出为本地分支" : "切换到此分支"}
+                </button>
+              )}
+              {!isCurrent && <div className="branch-menu-sep" />}
+              <button
+                className="branch-menu-item"
+                onClick={() => { setBranchMenu(null); setBranchInput({ mode: "create", branch: b, value: "" }); }}
+              >
+                <Plus size={13} />
+                基于此分支新建分支…
+              </button>
+              {!isRemote && (
+                <button
+                  className="branch-menu-item"
+                  onClick={() => { setBranchMenu(null); setBranchInput({ mode: "rename", branch: b, value: b.name }); }}
+                >
+                  <Pencil size={13} />
+                  重命名分支…
+                </button>
+              )}
+              {!isCurrent && (
+                <button
+                  className="branch-menu-item danger"
+                  onClick={() => { setBranchMenu(null); setBranchConfirm({ mode: "delete", branch: b, needForce: false }); }}
+                >
+                  <Trash2 size={13} />
+                  {isRemote ? "删除远程分支" : "删除分支"}
+                </button>
+              )}
+              {!isCurrent && (
+                <>
+                  <div className="branch-menu-sep" />
+                  <button
+                    className="branch-menu-item"
+                    onClick={() => { setBranchMenu(null); setBranchConfirm({ mode: "merge", branch: b, needForce: false }); }}
+                  >
+                    <GitMerge size={13} />
+                    合并 {b.name} 到当前分支
+                  </button>
+                </>
+              )}
+              <div className="branch-menu-sep" />
+              <button className="branch-menu-item" onClick={() => { setBranchMenu(null); handleCopyBranchName(b.name); }}>
+                <Copy size={13} />
+                复制分支名
+              </button>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* 新建 / 重命名 输入弹窗 */}
+      {branchInput && (
+        <div className="git-confirm-overlay" onClick={() => !branchOpBusy && setBranchInput(null)}>
+          <div className="git-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="git-confirm-title">
+              {branchInput.mode === "create" ? "新建分支" : "重命名分支"}
+            </div>
+            <div className="git-confirm-desc">
+              {branchInput.mode === "create" ? (
+                <>基于 <b>{branchInput.branch.name}</b> 创建并切换到新分支：</>
+              ) : (
+                <>将 <b>{branchInput.branch.name}</b> 重命名为：</>
+              )}
+            </div>
+            <input
+              className="branch-input-field"
+              autoFocus
+              value={branchInput.value}
+              placeholder="输入分支名"
+              onChange={(e) => setBranchInput({ ...branchInput, value: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); void submitBranchInput(); }
+                if (e.key === "Escape") setBranchInput(null);
+              }}
+            />
+            <div className="git-confirm-actions">
+              <button className="git-btn cancel" disabled={branchOpBusy} onClick={() => setBranchInput(null)}>取消</button>
+              <button
+                className="git-btn continue"
+                disabled={branchOpBusy || !branchInput.value.trim()}
+                onClick={() => void submitBranchInput()}
+              >
+                {branchOpBusy ? "处理中…" : branchInput.mode === "create" ? "创建并切换" : "重命名"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 删除 / 合并 确认弹窗 */}
+      {branchConfirm && (
+        <div className="git-confirm-overlay" onClick={() => !branchOpBusy && setBranchConfirm(null)}>
+          <div className="git-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            {branchConfirm.mode === "delete" ? (
+              <>
+                <div className="git-confirm-title">
+                  {branchConfirm.needForce
+                    ? "强制删除未合并分支？"
+                    : branchConfirm.branch.isRemote
+                      ? "删除远程分支？"
+                      : "删除分支？"}
+                </div>
+                <div className="git-confirm-desc">
+                  {branchConfirm.needForce ? (
+                    <>分支 <b>{branchConfirm.branch.name}</b> 存在未合并的提交，强制删除将永久丢失这些提交。</>
+                  ) : branchConfirm.branch.isRemote ? (
+                    <>将删除远程分支 <b>{branchConfirm.branch.name}</b>，这会直接影响远程仓库，其他人也会受影响。</>
+                  ) : (
+                    <>将删除本地分支 <b>{branchConfirm.branch.name}</b>。</>
+                  )}
+                </div>
+                <div className="git-confirm-actions">
+                  <button className="git-btn cancel" disabled={branchOpBusy} onClick={() => setBranchConfirm(null)}>取消</button>
+                  <button
+                    className="git-btn danger"
+                    disabled={branchOpBusy}
+                    onClick={() => void submitBranchConfirm(branchConfirm.needForce)}
+                  >
+                    {branchOpBusy ? "删除中…" : branchConfirm.needForce ? "强制删除" : "确认删除"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="git-confirm-title">合并分支？</div>
+                <div className="git-confirm-desc">
+                  将分支 <b>{branchConfirm.branch.name}</b> 合并到当前分支 <b>{currentBranchName ?? "?"}</b>。
+                </div>
+                <div className="git-confirm-actions">
+                  <button className="git-btn cancel" disabled={branchOpBusy} onClick={() => setBranchConfirm(null)}>取消</button>
+                  <button className="git-btn continue" disabled={branchOpBusy} onClick={() => void submitBranchConfirm()}>
+                    {branchOpBusy ? "合并中…" : "确认合并"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

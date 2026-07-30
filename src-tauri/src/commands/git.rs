@@ -1762,3 +1762,87 @@ pub async fn git_checkout_branch(
     .await
     .map_err(|e| format!("task_failed: {e}"))?
 }
+
+/// 新建分支（可选起点； checkout=true 时创建后立即切换）
+#[tauri::command]
+pub async fn git_create_branch(
+    project_path: String,
+    branch_name: String,
+    start_point: Option<String>,
+    checkout: bool,
+) -> Result<String, String> {
+    validate_branch_name(&branch_name)?;
+    if let Some(sp) = &start_point {
+        validate_branch_name(sp)?;
+    }
+    tokio::task::spawn_blocking(move || {
+        let mut args: Vec<&str> = if checkout {
+            vec!["checkout", "-b"]
+        } else {
+            vec!["branch"]
+        };
+        args.push(&branch_name);
+        if let Some(sp) = &start_point {
+            args.push(sp);
+        }
+        run_git_cli(&project_path, &args)
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 重命名本地分支
+#[tauri::command]
+pub async fn git_rename_branch(
+    project_path: String,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
+    validate_branch_name(&old_name)?;
+    validate_branch_name(&new_name)?;
+    tokio::task::spawn_blocking(move || {
+        run_git_cli(&project_path, &["branch", "-m", &old_name, &new_name])
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 删除分支（本地：-d/-D；远程：push <remote> --delete <ref>）
+/// 本地非强制删除时 git 会对未合并分支报 "not fully merged"，前端据此引导强制删除
+#[tauri::command]
+pub async fn git_delete_branch(
+    project_path: String,
+    branch_name: String,
+    is_remote: bool,
+    force: bool,
+) -> Result<String, String> {
+    validate_branch_name(&branch_name)?;
+    tokio::task::spawn_blocking(move || {
+        if is_remote {
+            // "origin/feature/x" → remote="origin", ref="feature/x"
+            let (remote, rest) = branch_name
+                .split_once('/')
+                .ok_or_else(|| "invalid_remote_branch".to_string())?;
+            if remote.is_empty() || rest.is_empty() || remote.starts_with('-') {
+                return Err("invalid_remote_branch".to_string());
+            }
+            run_git_cli(&project_path, &["push", remote, "--delete", rest])
+        } else {
+            let flag = if force { "-D" } else { "-d" };
+            run_git_cli(&project_path, &["branch", flag, &branch_name])
+        }
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
+/// 合并指定分支到当前分支（冲突可感知，复用与 pull 同套冲突检测）
+#[tauri::command]
+pub async fn git_merge_branch(project_path: String, branch_name: String) -> Result<String, String> {
+    validate_branch_name(&branch_name)?;
+    tokio::task::spawn_blocking(move || {
+        run_git_conflict_aware(&project_path, &["merge", "--no-edit", &branch_name])
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}

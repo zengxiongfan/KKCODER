@@ -5945,6 +5945,83 @@ input:checked + .switch-slider:before {
   color: #fca5a5;
 }
 
+/* ── 分支右键上下文菜单 ── */
+.branch-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+}
+
+.branch-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 200px;
+  background: var(--bg-sidebar, #1e1e2e);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  animation: diff-fade-in 0.12s ease;
+}
+
+.branch-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.branch-menu-item:hover {
+  background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
+}
+
+.branch-menu-item svg {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.branch-menu-item.danger {
+  color: #f87171;
+}
+
+.branch-menu-item.danger svg {
+  color: #f87171;
+}
+
+.branch-menu-sep {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 6px;
+}
+
+/* 新建/重命名 输入框（复用 git-confirm-dialog 弹窗壳） */
+.branch-input-field {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 12px 0;
+  padding: 7px 9px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  outline: none;
+}
+
+.branch-input-field:focus {
+  border-color: var(--color-orange, #fab387);
+}
+
 /* ── 分支列表 ── */
 .branch-list {
   flex: 0 0 auto;
