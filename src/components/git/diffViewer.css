@@ -135,6 +135,39 @@
   outline: 1px solid rgba(90, 200, 224, 0.35);
 }
 
+/* ── 字符级行内高亮（markEdits）：同一行只加深真正变化的片段 ── */
+.diff-viewer-container .diff-code-insert .diff-code-edit {
+  background-color: var(--git-diff-insert-decoration);
+  border-radius: 2px;
+}
+
+.diff-viewer-container .diff-code-delete .diff-code-edit {
+  background-color: var(--git-diff-delete-decoration);
+  border-radius: 2px;
+}
+
+/* ── 未改动区域折叠占位：点击展开 ── */
+.diff-viewer-container .diff-expand-bar {
+  display: block;
+  width: 100%;
+  padding: 3px 0;
+  text-align: center;
+  background: var(--git-diff-hunk-bg);
+  color: var(--git-diff-muted);
+  border: none;
+  border-top: 1px solid var(--git-diff-border);
+  border-bottom: 1px solid var(--git-diff-border);
+  font-family: var(--font-family);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.diff-viewer-container .diff-expand-bar:hover {
+  color: var(--git-diff-hunk-text);
+  background: rgba(148, 163, 184, 0.2);
+}
+
 /* ── refractor 语法 token ── */
 
 .diff-viewer-container .token.comment,

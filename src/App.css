@@ -5673,6 +5673,73 @@ input:checked + .switch-slider:before {
   color: var(--text-primary);
 }
 
+/* diff 视图切换（并排/内联）分段控件 */
+.diff-view-toggle {
+  display: flex;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.diff-view-toggle button {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.diff-view-toggle button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.diff-view-toggle button.on {
+  background: var(--color-blue, #2563eb);
+  color: #fff;
+}
+
+/* diff 头部图标按钮（上/下一个更改、折叠开关） */
+.diff-nav-group {
+  display: flex;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.diff-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.diff-nav-group .diff-icon-btn:first-child {
+  border-right: 1px solid var(--border-color);
+}
+
+.diff-icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.diff-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.diff-icon-btn.on {
+  color: var(--color-blue, #2563eb);
+}
+
 .diff-modal-close {
   width: 24px;
   height: 24px;

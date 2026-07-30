@@ -4355,7 +4355,8 @@ pub fn run() {
             commands::git::git_update_branch,
             commands::git::git_commit_stat,
             commands::git::git_commit_files,
-            commands::git::git_commit_file_diff
+            commands::git::git_commit_file_diff,
+            commands::git::git_file_content
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

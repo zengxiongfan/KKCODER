@@ -1732,6 +1732,49 @@ pub async fn git_commit_file_diff(
     .map_err(|e| format!("task_failed: {e}"))?
 }
 
+/// 读取指定版本（rev，如 "HEAD" 或 "<sha>^"）中某文件的全文内容，
+/// 供 diff 查看器展开/折叠未改动区域时作为 oldSource。
+/// 文件在该版本不存在（新增）、版本无法解析（如根提交的父）或二进制时返回空串
+#[tauri::command]
+pub async fn git_file_content(
+    project_path: String,
+    file_path: String,
+    rev: String,
+) -> Result<String, String> {
+    validate_repo_relative_path(&file_path)?;
+    tokio::task::spawn_blocking(move || {
+        let path = Path::new(&project_path);
+        if !path.exists() {
+            return Err("path_not_found".to_string());
+        }
+        let repo = open_git_repo(path).map_err(|e| format!("open_repo_failed: {e}"))?;
+        // rev 解析失败（如根提交的 "<sha>^"）视为无旧版本
+        let obj = match repo.revparse_single(&rev) {
+            Ok(o) => o,
+            Err(_) => return Ok(String::new()),
+        };
+        let commit = match obj.peel_to_commit() {
+            Ok(c) => c,
+            Err(_) => return Ok(String::new()),
+        };
+        let tree = commit.tree().map_err(|e| format!("tree_failed: {e}"))?;
+        // 该版本无此文件（新增）→ 空串
+        let entry = match tree.get_path(Path::new(&file_path)) {
+            Ok(e) => e,
+            Err(_) => return Ok(String::new()),
+        };
+        let object = entry.to_object(&repo).map_err(|e| format!("obj_failed: {e}"))?;
+        match object.as_blob() {
+            Some(blob) if !blob.is_binary() => {
+                Ok(String::from_utf8_lossy(blob.content()).to_string())
+            }
+            _ => Ok(String::new()),
+        }
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}
+
 /// 切换到指定分支（避开工作区写入潜在风险，直接 shell out git）
 ///
 /// - 本地分支：`git checkout <name>`
