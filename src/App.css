@@ -6385,18 +6385,6 @@ input:checked + .switch-slider:before {
   margin-left: 4px;
 }
 
-.branch-commit-sha {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-yellow, #facc15);
-  padding: 1px 4px;
-  background: rgba(250, 204, 21, 0.1);
-  border-radius: 3px;
-  flex-shrink: 0;
-  line-height: 1.4;
-  margin-top: 1px;
-}
-
 .branch-commit-main {
   flex: 1;
   min-width: 0;

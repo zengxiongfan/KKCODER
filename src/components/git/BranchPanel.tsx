@@ -1024,7 +1024,6 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
                       >
                         <ChevronRight size={10} strokeWidth={2} />
                       </span>
-                      <span className="branch-commit-sha">{c.shortSha}</span>
                       <div className="branch-commit-main">
                         <div className="branch-commit-summary">{c.summary || "(无提交信息)"}</div>
                         <div className="branch-commit-meta">
