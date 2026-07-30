@@ -5984,6 +5984,15 @@ input:checked + .switch-slider:before {
   background: var(--bg-hover-item, rgba(148, 163, 184, 0.12));
 }
 
+.branch-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.branch-menu-item:disabled:hover {
+  background: transparent;
+}
+
 .branch-menu-item svg {
   color: var(--text-secondary);
   flex-shrink: 0;

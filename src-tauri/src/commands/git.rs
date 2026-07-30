@@ -1846,3 +1846,28 @@ pub async fn git_merge_branch(project_path: String, branch_name: String) -> Resu
     .await
     .map_err(|e| format!("task_failed: {e}"))?
 }
+
+/// 快进更新一个非当前分支的本地引用到其远端（git fetch <remote> <remote_branch>:<local_branch>）
+/// 仅在可快进时成功；分叉时 git 拒绝（映射为 not_fast_forward），不触碰工作区
+#[tauri::command]
+pub async fn git_update_branch(
+    project_path: String,
+    remote: String,
+    remote_branch: String,
+    local_branch: String,
+) -> Result<String, String> {
+    validate_branch_name(&remote_branch)?;
+    validate_branch_name(&local_branch)?;
+    if remote.is_empty()
+        || remote.starts_with('-')
+        || !remote.chars().all(|c| c.is_alphanumeric() || "-_./".contains(c))
+    {
+        return Err("invalid_remote".to_string());
+    }
+    tokio::task::spawn_blocking(move || {
+        let refspec = format!("{remote_branch}:{local_branch}");
+        run_git_cli(&project_path, &["fetch", &remote, &refspec])
+    })
+    .await
+    .map_err(|e| format!("task_failed: {e}"))?
+}

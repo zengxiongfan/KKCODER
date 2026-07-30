@@ -4352,6 +4352,7 @@ pub fn run() {
             commands::git::git_rename_branch,
             commands::git::git_delete_branch,
             commands::git::git_merge_branch,
+            commands::git::git_update_branch,
             commands::git::git_commit_stat,
             commands::git::git_commit_files,
             commands::git::git_commit_file_diff

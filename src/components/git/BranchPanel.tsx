@@ -521,6 +521,9 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
     if (msg.includes("not fully merged")) {
       return "分支存在未合并的提交";
     }
+    if (msg.includes("not_fast_forward") || msg.includes("non-fast-forward") || msg.includes("[rejected]")) {
+      return "该分支与远端已分叉，无法快进更新，请先切换到该分支再拉取/合并";
+    }
     if (msg.includes("pull_conflict") || msg.includes("conflict") || msg.includes("Automatic merge failed")) {
       return "合并存在冲突，请在终端手动解决后提交";
     }
@@ -630,6 +633,36 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
       setCheckoutError(localizeGitError(String(e)));
     } finally {
       setPulling(false);
+    }
+  };
+
+  // 从远端更新指定本地分支：当前分支走 pull；非当前分支走快进 fetch（不切换、不碰工作区）
+  const handleUpdateBranch = async (b: GitBranchItem) => {
+    setBranchMenu(null);
+    if (!b.upstream || branchOpBusy || pulling || fetching) return;
+    setBranchOpBusy(true);
+    setCheckoutError(null);
+    try {
+      if (b.isCurrent) {
+        await invoke("git_pull", { projectPath: repoPath, strategy: pullStrategy });
+      } else {
+        // upstream 形如 "origin/main" → remote="origin", remoteBranch="main"
+        const slash = b.upstream.indexOf("/");
+        const remote = slash > 0 ? b.upstream.slice(0, slash) : "origin";
+        const remoteBranch = slash > 0 ? b.upstream.slice(slash + 1) : b.upstream;
+        await invoke("git_update_branch", {
+          projectPath: repoPath,
+          remote,
+          remoteBranch,
+          localBranch: b.name,
+        });
+      }
+      await fetchBranches(true);
+      if (selectedRef) fetchCommits(selectedRef, false);
+    } catch (e) {
+      setCheckoutError(localizeGitError(String(e)));
+    } finally {
+      setBranchOpBusy(false);
     }
   };
 
@@ -1181,7 +1214,18 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
                   {isRemote ? "检出为本地分支" : "切换到此分支"}
                 </button>
               )}
-              {!isCurrent && <div className="branch-menu-sep" />}
+              {!isRemote && (
+                <button
+                  className="branch-menu-item"
+                  disabled={!b.upstream}
+                  onClick={() => handleUpdateBranch(b)}
+                  title={b.upstream ? `从 ${b.upstream} 快进更新` : "无上游，无法更新"}
+                >
+                  <RepoPullIcon size={13} />
+                  从远端更新此分支
+                </button>
+              )}
+              {(!isCurrent || !isRemote) && <div className="branch-menu-sep" />}
               <button
                 className="branch-menu-item"
                 onClick={() => { setBranchMenu(null); setBranchInput({ mode: "create", branch: b, value: "" }); }}
