@@ -34,6 +34,8 @@ import {
   Folder,
   Cloud,
   HardDrive,
+  List,
+  MoreHorizontal,
 } from "lucide-react";
 import { DiffViewerModal } from "./DiffViewerModal";
 import { FileIcon } from "../../utils/fileIcons";
@@ -94,7 +96,7 @@ interface GitTreeNode {
 
 type StageState = "checked" | "unchecked" | "indeterminate";
 type GitStatusFilter = "all" | "M" | "A" | "D";
-type GroupByMode = "directory" | "module";
+type GroupByMode = "list" | "directory" | "module";
 
 interface GitPanelProps {
   projectPath: string;
@@ -580,7 +582,11 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<GitStatusFilter>("all");
-  const [groupBy, setGroupBy] = useState<GroupByMode>("directory");
+  // 视图模式：平铺 / 目录树 / 模块（持久化，默认平铺——VSCode 同款默认）
+  const [groupBy, setGroupBy] = useState<GroupByMode>(() => {
+    const saved = localStorage.getItem("kkcoder_git_groupby");
+    return saved === "directory" || saved === "module" ? saved : "list";
+  });
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
   const [selectedUntracked, setSelectedUntracked] = useState<Set<string>>(new Set());
   const [deselectedAdded, setDeselectedAdded] = useState<Set<string>>(new Set());
@@ -616,7 +622,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
   const [discardTarget, setDiscardTarget] = useState<{ path: string; status: string } | null>(null);
 
-  const [groupByMenuOpen, setGroupByMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [hideFilterLabels, setHideFilterLabels] = useState(false);
   const filterRowRef = useRef<HTMLDivElement | null>(null);
@@ -891,8 +897,15 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   };
 
   const handleGroupByChange = (mode: GroupByMode) => {
-    setGroupByMenuOpen(false);
+    setMoreMenuOpen(false);
     setGroupBy(mode);
+    localStorage.setItem("kkcoder_git_groupby", mode);
+  };
+
+  // 视图单图标循环切换：平铺 → 目录树 → 模块
+  const cycleViewMode = () => {
+    const order: GroupByMode[] = ["list", "directory", "module"];
+    handleGroupByChange(order[(order.indexOf(groupBy) + 1) % order.length]);
   };
 
   const handleToggleSelectAll = () => {
@@ -922,6 +935,15 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
       }
     }
   };
+
+  // 全选三态复选框：内嵌在「改动/未跟踪文件」分组标题后（管的是变更文件的勾选范围）
+  const sectionSelectAll = (
+    <StageCheckbox
+      state={selectAllState}
+      onToggle={handleToggleSelectAll}
+      title={selectAllState === "checked" ? "取消全选" : "全选"}
+    />
+  );
 
   const handleToggleStage = (filePath: string, currentlyStaged: boolean) => {
     setStaging(filePath);
@@ -1219,6 +1241,103 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     setDiffFile({ path: filePath, status });
   };
 
+  // ── List 平铺视图行渲染（复用树视图文件节点的勾选/丢弃/diff 交互） ──
+  const renderFlatRow = (change: GitFileChange) => {
+    const fileName = change.path.split("/").pop() || change.path;
+    const dirPath = change.path.slice(0, change.path.length - fileName.length).replace(/\/$/, "");
+    const config = STATUS_CONFIG[change.status] || STATUS_CONFIG["M"];
+    const isUntrackedFile = isUntracked(change.status);
+    const isAdded = change.status === "A";
+    const canDiscardFile = !isUntrackedFile;
+    const untrackedSelected = isUntrackedFile && selectedUntracked.has(change.path);
+    const addedSelected = isAdded && !deselectedAdded.has(change.path);
+    const checkboxState: StageState = isUntrackedFile
+      ? untrackedSelected
+        ? "checked"
+        : "unchecked"
+      : isAdded
+        ? addedSelected
+          ? "checked"
+          : "unchecked"
+        : change.staged
+          ? "checked"
+          : "unchecked";
+
+    let fileNameColor = "var(--text-primary)";
+    switch (change.status) {
+      case "M": fileNameColor = "#60a5fa"; break;
+      case "A": fileNameColor = "#4ade80"; break;
+      case "D": fileNameColor = "#808080"; break;
+      case "U": case "??": fileNameColor = "#f87171"; break;
+      case "R": fileNameColor = "#c084fc"; break;
+    }
+
+    const handleCheckboxToggle = () => {
+      if (isUntrackedFile) {
+        setSelectedUntracked((prev) => {
+          const next = new Set(prev);
+          if (next.has(change.path)) next.delete(change.path);
+          else next.add(change.path);
+          return next;
+        });
+      } else if (isAdded) {
+        setDeselectedAdded((prev) => {
+          const next = new Set(prev);
+          if (next.has(change.path)) next.delete(change.path);
+          else next.add(change.path);
+          return next;
+        });
+      } else {
+        handleToggleStage(change.path, change.staged);
+      }
+    };
+
+    return (
+      <div
+        key={change.path}
+        className="git-file-row git-flat-row"
+        onClick={() => handleFileClick(change.path, change.status)}
+        onContextMenu={(e) => handleContextMenu(e, change.path, false)}
+      >
+        <StageCheckbox
+          state={checkboxState}
+          onToggle={handleCheckboxToggle}
+          title={
+            isUntrackedFile
+              ? "选中以在提交时包含"
+              : isAdded
+                ? addedSelected
+                  ? "取消勾选（仍保持跟踪）"
+                  : "勾选以包含在本次提交"
+                : change.staged
+                  ? "取消暂存"
+                  : "暂存"
+          }
+        />
+        <FileIcon name={fileName} size={12} className="git-file-icon" />
+        <span className="git-file-name git-flat-name" style={{ color: fileNameColor }}>{fileName}</span>
+        {dirPath && <span className="git-flat-path">{dirPath}</span>}
+        {canDiscardFile && (
+          <button
+            className="git-discard-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (discarding !== change.path) setDiscardTarget({ path: change.path, status: change.status });
+            }}
+            title="丢弃更改"
+          >
+            <Undo2 size={11} />
+          </button>
+        )}
+        {change.added > 0 && <span className="git-line-stats plus">+{change.added}</span>}
+        {change.deleted > 0 && <span className="git-line-stats minus">-{change.deleted}</span>}
+        <span className="status-badge" style={{ color: config.color, background: config.color + "20" }} title={config.tooltip}>
+          {config.symbol}
+        </span>
+      </div>
+    );
+  };
+
   // ── 渲染 ──
 
   const FILTER_LABELS: Record<GitStatusFilter, string> = {
@@ -1245,72 +1364,14 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             提交
           </span>
           <div className="git-header-actions">
-            {/* Group By 切换 */}
-            <div className="git-dropdown-wrapper">
-              <button
-                className="git-action-btn git-groupby-btn"
-                onClick={() => setGroupByMenuOpen(!groupByMenuOpen)}
-                title="分组方式"
-              >
-                {groupBy === "module" ? <Layers size={10} /> : <FolderTree size={10} />}
-                <ChevronDown size={8} />
-              </button>
-              {groupByMenuOpen && (
-                <>
-                  <div className="git-dropdown-overlay" onClick={() => setGroupByMenuOpen(false)} />
-                  <div className="git-dropdown-menu">
-                    <button
-                      className={`git-dropdown-item ${groupBy === "directory" ? "active" : ""}`}
-                      onClick={() => handleGroupByChange("directory")}
-                    >
-                      <FolderTree size={12} />
-                      <span>Directory</span>
-                      {groupBy === "directory" && <Check size={11} />}
-                    </button>
-                    <button
-                      className={`git-dropdown-item ${groupBy === "module" ? "active" : ""}`}
-                      onClick={() => handleGroupByChange("module")}
-                    >
-                      <Layers size={12} />
-                      <span>Module</span>
-                      {groupBy === "module" && <Check size={11} />}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* 全选三态复选框 */}
-            {changes.length > 0 && (
-              <StageCheckbox
-                state={selectAllState}
-                onToggle={handleToggleSelectAll}
-                title={selectAllState === "checked" ? "取消全选" : "全选"}
-              />
-            )}
-
-            {/* 折叠/展开全部 */}
-            {hasDirectories && (
-              <button
-                className="git-action-btn"
-                onClick={allCollapsed ? expandAllDirs : collapseAllDirs}
-                title={allCollapsed ? "展开全部" : "折叠全部"}
-              >
-                {allCollapsed ? "展开" : "折叠"}
-              </button>
-            )}
-
-            {/* 丢弃全部 */}
-            {trackableCount > 0 && (
-              <button
-                className="git-action-btn git-discard-all-btn"
-                onClick={() => setConfirmDiscardAll(true)}
-                disabled={discarding === "*"}
-                title="丢弃全部已跟踪文件的更改"
-              >
-                <Undo2 size={11} />
-              </button>
-            )}
+            {/* 视图切换（单图标循环：平铺→目录→模块） */}
+            <button
+              className="git-action-btn"
+              onClick={cycleViewMode}
+              title={`视图：${groupBy === "list" ? "平铺" : groupBy === "directory" ? "目录树" : "模块"}（点击切换）`}
+            >
+              {groupBy === "list" ? <List size={11} /> : groupBy === "directory" ? <FolderTree size={11} /> : <Layers size={11} />}
+            </button>
 
             {/* 刷新 */}
             <button
@@ -1320,6 +1381,73 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
             >
               <RefreshCw size={11} />
             </button>
+
+            {/* ⋯ 溢出菜单：视图选择 / 折叠 / 丢弃全部 */}
+            <div className="git-dropdown-wrapper">
+              <button
+                className="git-action-btn"
+                onClick={() => setMoreMenuOpen(!moreMenuOpen)}
+                title="更多操作"
+              >
+                <MoreHorizontal size={12} />
+              </button>
+              {moreMenuOpen && (
+                <>
+                  <div className="git-dropdown-overlay" onClick={() => setMoreMenuOpen(false)} />
+                  <div className="git-dropdown-menu git-more-menu">
+                    <button
+                      className={`git-dropdown-item ${groupBy === "list" ? "active" : ""}`}
+                      onClick={() => handleGroupByChange("list")}
+                    >
+                      <List size={12} />
+                      <span>视图：平铺</span>
+                      {groupBy === "list" && <Check size={11} />}
+                    </button>
+                    <button
+                      className={`git-dropdown-item ${groupBy === "directory" ? "active" : ""}`}
+                      onClick={() => handleGroupByChange("directory")}
+                    >
+                      <FolderTree size={12} />
+                      <span>视图：目录树</span>
+                      {groupBy === "directory" && <Check size={11} />}
+                    </button>
+                    <button
+                      className={`git-dropdown-item ${groupBy === "module" ? "active" : ""}`}
+                      onClick={() => handleGroupByChange("module")}
+                    >
+                      <Layers size={12} />
+                      <span>视图：模块</span>
+                      {groupBy === "module" && <Check size={11} />}
+                    </button>
+                    {groupBy !== "list" && hasDirectories && (
+                      <button
+                        className="git-dropdown-item git-more-menu-sep"
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          allCollapsed ? expandAllDirs() : collapseAllDirs();
+                        }}
+                      >
+                        <ChevronDown size={12} />
+                        <span>{allCollapsed ? "展开全部" : "折叠全部"}</span>
+                      </button>
+                    )}
+                    {trackableCount > 0 && (
+                      <button
+                        className={`git-dropdown-item git-more-menu-danger ${groupBy === "list" || !hasDirectories ? "git-more-menu-sep" : ""}`}
+                        disabled={discarding === "*"}
+                        onClick={() => {
+                          setMoreMenuOpen(false);
+                          setConfirmDiscardAll(true);
+                        }}
+                      >
+                        <Undo2 size={12} />
+                        <span>丢弃全部更改…</span>
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1435,6 +1563,29 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
           <div className="git-error">{error}</div>
         ) : changes.length === 0 ? (
           <div className="git-empty">无文件变更</div>
+        ) : groupBy === "list" ? (
+          <>
+            {trackedChanges.length > 0 && (
+              <div>
+                <div className="git-section-label">
+                  <span className="dot" />
+                  改动
+                  {sectionSelectAll}
+                </div>
+                {[...trackedChanges].sort((a, b) => a.path.localeCompare(b.path)).map(renderFlatRow)}
+              </div>
+            )}
+            {untrackedChanges.length > 0 && (
+              <div className={trackedChanges.length > 0 ? "git-untracked-section" : ""}>
+                <div className="git-section-label untracked">
+                  <span className="dot" />
+                  未跟踪文件
+                  {trackedChanges.length === 0 && sectionSelectAll}
+                </div>
+                {[...untrackedChanges].sort((a, b) => a.path.localeCompare(b.path)).map(renderFlatRow)}
+              </div>
+            )}
+          </>
         ) : (
           <>
             {tree.children.length > 0 && (
@@ -1442,6 +1593,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                 <div className="git-section-label">
                   <span className="dot" />
                   改动
+                  {sectionSelectAll}
                 </div>
                 {tree.children.map((node) => (
                   <GitTreeNodeRow
@@ -1504,6 +1656,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                 <div className="git-section-label untracked">
                   <span className="dot" />
                   未跟踪文件
+                  {tree.children.length === 0 && sectionSelectAll}
                 </div>
                 {untrackedTree.children.map((node) => (
                   <GitTreeNodeRow

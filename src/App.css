@@ -4901,6 +4901,44 @@ input:checked + .switch-slider:before {
 .git-line-stats.plus { color: #4ade80; }
 .git-line-stats.minus { color: #f87171; }
 
+/* ==================== List 平铺视图行（VSCode 默认样式） ==================== */
+.git-flat-row {
+  padding-left: 8px;
+}
+
+/* 覆盖 .git-file-name 的 flex:1：平铺行里文件名只占内容宽，路径紧随其后 */
+.git-flat-row .git-flat-name {
+  flex: 0 1 auto;
+}
+
+.git-flat-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.55;
+}
+
+/* 标题行 ⋯ 溢出菜单 */
+.git-more-menu {
+  min-width: 150px;
+}
+
+.git-more-menu-sep {
+  border-top: 1px solid var(--border-color);
+  margin-top: 3px;
+  padding-top: 7px;
+  border-radius: 0;
+}
+
+.git-more-menu-danger,
+.git-more-menu-danger svg {
+  color: #f87171 !important;
+}
+
 /* 丢弃按钮（文件行） */
 .git-discard-btn {
   width: 16px;
