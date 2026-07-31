@@ -658,10 +658,10 @@ function App() {
       if (!root) return;
 
       const htmlRoot = root as HTMLElement;
-      const originalMinWidth = htmlRoot.style.minWidth;
-      htmlRoot.style.minWidth = "0";
+      // 加 measuring 类临时恢复内容固有宽度（width:max-content + 文件名不截断），测出真实树宽
+      htmlRoot.classList.add("measuring");
       const contentWidth = htmlRoot.scrollWidth;
-      htmlRoot.style.minWidth = originalMinWidth;
+      htmlRoot.classList.remove("measuring");
 
       const maxW = Math.floor(window.innerWidth * 0.4);
       const idealW = Math.max(200, Math.min(maxW, contentWidth + 24));
@@ -2884,40 +2884,43 @@ function App() {
             />
             <aside
               ref={projectTreeAsideRef}
-              className="project-tree-aside"
+              className={`project-tree-aside${projectTreeWidth < 250 ? " narrow" : ""}`}
               style={{ width: `${projectTreeWidth}px` }}
             >
               <div className="project-tree-aside-header">
                 <div className="aside-tabs">
                   <button
                     className={`aside-tab ${rightPanelTab === "files" ? "active" : ""}`}
+                    title="文件"
                     onClick={() => {
                       setRightPanelTab("files");
                       localStorage.setItem("kkcoder_right_panel_tab", "files");
                     }}
                   >
-                    <Folder size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                    文件
+                    <Folder size={12} />
+                    <span className="aside-tab-label">文件</span>
                   </button>
                   <button
                     className={`aside-tab ${rightPanelTab === "git" ? "active" : ""}`}
+                    title="提交"
                     onClick={() => {
                       setRightPanelTab("git");
                       localStorage.setItem("kkcoder_right_panel_tab", "git");
                     }}
                   >
-                    <GitCommit size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                    提交
+                    <GitCommit size={12} />
+                    <span className="aside-tab-label">提交</span>
                   </button>
                   <button
                     className={`aside-tab ${rightPanelTab === "branches" ? "active" : ""}`}
+                    title="分支"
                     onClick={() => {
                       setRightPanelTab("branches");
                       localStorage.setItem("kkcoder_right_panel_tab", "branches");
                     }}
                   >
-                    <GitBranch size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-                    分支
+                    <GitBranch size={12} />
+                    <span className="aside-tab-label">分支</span>
                   </button>
                 </div>
                 {activeSession && activeSession.path && (

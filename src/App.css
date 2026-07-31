@@ -2977,7 +2977,7 @@ input:checked + .switch-slider:before {
   flex-direction: column;
   flex-shrink: 0;
   height: 100%;
-  overflow-x: auto;
+  overflow-x: hidden; /* 禁止横向滚动：内容自适应/截断，头部永不被滱出视口 */
   overflow-y: hidden;
 }
 
@@ -2989,6 +2989,8 @@ input:checked + .switch-slider:before {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
   background-color: rgba(0, 0, 0, 0.1);
   user-select: none;
 }
@@ -3013,6 +3015,8 @@ input:checked + .switch-slider:before {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 150px;
+  min-width: 0;
+  flex: 0 1 auto; /* 窄宽时优先收缩项目名（省略号），保 tab 完整 */
   font-family: var(--font-mono);
 }
 
@@ -3108,6 +3112,7 @@ input:checked + .switch-slider:before {
 .project-tree-body {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* 长文件名省略号截断，不出横向滚动条（VSCode 同款） */
   padding: 8px 0;
 }
 
@@ -3125,8 +3130,19 @@ input:checked + .switch-slider:before {
 }
 
 .project-tree-root {
+  width: 100%;
+  min-width: 0;
+}
+
+/* 自动展宽测量态：临时恢复内容固有宽度，供 scrollWidth 测出真实树宽 */
+.project-tree-root.measuring {
   width: max-content;
-  min-width: 100%;
+  min-width: 0;
+}
+
+.project-tree-root.measuring .tree-node-name {
+  flex-shrink: 0;
+  overflow: visible;
 }
 
 .tree-node {
@@ -3175,7 +3191,10 @@ input:checked + .switch-slider:before {
 
 .tree-node-name {
   white-space: nowrap;
-  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
   padding-right: 16px;
 }
 
@@ -4460,6 +4479,7 @@ input:checked + .switch-slider:before {
 .aside-tabs {
   display: flex;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .aside-tab {
@@ -4474,6 +4494,18 @@ input:checked + .switch-slider:before {
   transition: all 0.15s;
   position: relative;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 窄宽自适应（面板 < 250px）：tab 只留图标，hover 靠 title 提示，对齐 VSCode 窄态行为 */
+.project-tree-aside.narrow .aside-tab-label {
+  display: none;
+}
+
+.project-tree-aside.narrow .aside-tab {
+  padding: 5px 9px;
 }
 
 .aside-tab:hover {
