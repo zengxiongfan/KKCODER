@@ -3365,6 +3365,78 @@ input:checked + .switch-slider:before {
   user-select: text;
 }
 
+/* 编辑器宿主：去掉 padding/滚动，让 Monaco 满高自己接管滚动 */
+.preview-body.editor-host {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ==================== Monaco 文件编辑器 ==================== */
+.file-editor-wrapper {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-editor-monaco {
+  flex: 1;
+  min-height: 0;
+}
+
+.file-editor-error {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.file-editor-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 24px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-sidebar, #1e1e2e);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.file-editor-status .fe-st-flag {
+  margin-left: auto;
+}
+
+.file-editor-status .fe-st-flag.as-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.file-editor-status .fe-st-flag.as-btn.dirty {
+  color: var(--color-orange, #fab387);
+}
+
+.file-editor-status .fe-st-flag.as-btn:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.12));
+}
+
+.file-editor-status .fe-st-flag.as-btn:disabled {
+  cursor: default;
+}
+
+.file-editor-status .fe-st-flag.readonly {
+  margin-left: auto;
+  opacity: 0.7;
+}
+
 .preview-text-content {
   font-family: var(--font-mono);
   font-size: 12.5px;
@@ -5607,9 +5679,9 @@ input:checked + .switch-slider:before {
 }
 
 .diff-modal {
-  width: 80vw;
-  max-width: 900px;
-  height: 70vh;
+  width: 86vw;
+  max-width: 1280px; /* Monaco 并排 diff 两栏各占一半，加宽避免拥挤 */
+  height: 76vh;
   background: var(--bg-sidebar, #1e1e2e);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -5775,6 +5847,19 @@ input:checked + .switch-slider:before {
   flex: 1;
   overflow: auto;
   min-height: 0;
+}
+
+/* Monaco DiffEditor 宿主：去掉滚动/内边距，让编辑器满高自管滚动 */
+.diff-modal-body.diff-editor-host {
+  overflow: hidden;
+}
+
+/* 头部未保存脏态点 */
+.diff-dirty-dot {
+  margin-left: 6px;
+  font-size: 9px;
+  vertical-align: middle;
+  color: var(--color-warning, #f59e0b);
 }
 
 .diff-loading,

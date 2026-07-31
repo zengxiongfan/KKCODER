@@ -3625,8 +3625,16 @@ fn search_project_files(project_path: String, query: String) -> Result<Vec<Proje
 }
 
 
+/// 文件内容 + 检测到的编码（utf-8 / gbk），保存时按原编码写回避免遗留项目乱码
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectFileContent {
+    content: String,
+    encoding: String,
+}
+
 #[tauri::command]
-fn read_project_file_content(project_path: String, relative_path: String) -> Result<String, String> {
+fn read_project_file_content(project_path: String, relative_path: String) -> Result<ProjectFileContent, String> {
     log_to_file(&format!("read_project_file_content called: project_path={}, relative_path={}", project_path, relative_path));
     let root = std::path::Path::new(&project_path);
     let full_path = root.join(&relative_path);
@@ -3645,16 +3653,66 @@ fn read_project_file_content(project_path: String, relative_path: String) -> Res
         return Err("Not a file".to_string());
     }
 
-    let mut file = std::fs::File::open(&full_path_canonical).map_err(|e| e.to_string())?;
-    use std::io::Read;
-    let mut buffer = vec![0; 1024 * 1024]; // 1MB limit
-    let bytes_read = file.read(&mut buffer).map_err(|e| e.to_string())?;
-    buffer.truncate(bytes_read);
-
-    match String::from_utf8(buffer) {
-        Ok(content) => Ok(content),
-        Err(_) => Err("Binary file or invalid UTF-8 encoding. Preview is disabled.".to_string()),
+    // 整文件读取（避免旧实现 1MB 截断在多字节字符中间导致误判），上限 5MB
+    const MAX_EDIT_SIZE: u64 = 5 * 1024 * 1024;
+    let meta = std::fs::metadata(&full_path_canonical).map_err(|e| e.to_string())?;
+    if meta.len() > MAX_EDIT_SIZE {
+        return Err("File too large to preview/edit (>5MB).".to_string());
     }
+    let bytes = std::fs::read(&full_path_canonical).map_err(|e| e.to_string())?;
+
+    // 编码回退：UTF-8 → GBK（国内遗留 Java 项目常见）→ 判为二进制
+    match String::from_utf8(bytes) {
+        Ok(content) => Ok(ProjectFileContent { content, encoding: "utf-8".into() }),
+        Err(e) => {
+            let bytes = e.into_bytes();
+            let (decoded, _, had_errors) = encoding_rs::GBK.decode(&bytes);
+            if !had_errors {
+                Ok(ProjectFileContent { content: decoded.into_owned(), encoding: "gbk".into() })
+            } else {
+                Err("Binary file or unsupported encoding. Preview is disabled.".to_string())
+            }
+        }
+    }
+}
+
+/// 写回工作区文件（仅限项目根内的已有文件，路径规范化校验防穿越）；
+/// encoding 为读取时检测到的编码（gbk 文件按 GBK 写回，保持原编码不乱码）
+#[tauri::command]
+fn write_project_file_content(
+    project_path: String,
+    relative_path: String,
+    content: String,
+    encoding: Option<String>,
+) -> Result<(), String> {
+    let root = std::path::Path::new(&project_path);
+    let full_path = root.join(&relative_path);
+
+    let root_canonical = root
+        .canonicalize()
+        .map_err(|e| format!("Failed to canonicalize project root: {}", e))?;
+    // 编辑的是已存在文件，规范化后校验在项目根内
+    let full_path_canonical = full_path
+        .canonicalize()
+        .map_err(|e| format!("File not found or inaccessible: {}", e))?;
+    if !full_path_canonical.starts_with(&root_canonical) {
+        return Err("Access denied: File outside project root".to_string());
+    }
+    if !full_path_canonical.is_file() {
+        return Err("Not a file".to_string());
+    }
+    let bytes: Vec<u8> = match encoding.as_deref() {
+        Some("gbk") => {
+            let (encoded, _, had_errors) = encoding_rs::GBK.encode(&content);
+            if had_errors {
+                return Err("内容含无法用 GBK 编码的字符，已取消保存以免乱码".to_string());
+            }
+            encoded.into_owned()
+        }
+        _ => content.into_bytes(),
+    };
+    std::fs::write(&full_path_canonical, bytes)
+        .map_err(|e| format!("Failed to write file: {}", e))
 }
 
 #[tauri::command]
@@ -4298,6 +4356,7 @@ pub fn run() {
             read_project_directory,
             search_project_files,
             read_project_file_content,
+            write_project_file_content,
             open_file_in_system,
             open_in_file_manager,
             select_ccswitch_file,

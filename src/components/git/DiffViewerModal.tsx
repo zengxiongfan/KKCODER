@@ -1,103 +1,119 @@
 /**
- * DiffViewerModal — 文件 diff 查看器（VSCode 风格）
+ * DiffViewerModal — 文件 diff 查看器（Monaco DiffEditor，VSCode diff 内核本体）
  *
- * - 全文件视图：未改动区域折叠为「展开 N 行」占位，点击按需展开（useSourceExpansion）
- * - 字符级行内高亮：同一行只高亮真正变化的片段（markEdits）
- * - 并排 / 内联视图切换（持久化）
- * - 语法高亮（refractor）+ Hunk/行级回滚（仅工作区模式）
+ * 并排/内联(renderSideBySide)、折叠未改区域(hideUnchangedRegions)、字符级高亮、
+ * 语法着色、上下块导航、块级回滚箭头(renderMarginRevertIcon) 全部 Monaco 原生自带。
  *
- * 数据源双模式：传入 sha → 历史提交只读；否则 → 工作区可回滚。
- * 展开/折叠依赖旧版文件全文 oldSource（git_file_content 提供）。
+ * 双模式：
+ *   - 传入 sha → 历史提交，两侧只读；
+ *   - 否则     → 工作区，右侧可编辑 + Ctrl+S 存盘（块级 ↩ 回滚 = 改模型后存盘）。
+ *
+ * 数据源（后端现有命令，无需新增）：
+ *   工作区：original = git_file_content(HEAD)，modified = read_project_file_content(磁盘, 带编码)
+ *   提交：  original = git_file_content(<sha>^)，modified = git_file_content(<sha>)
  */
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, type FC } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { X, RotateCcw, ArrowUp, ArrowDown, FoldVertical, UnfoldVertical } from "lucide-react";
-import {
-  parseDiff,
-  Diff,
-  Hunk,
-  Decoration,
-  tokenize,
-  markEdits,
-  getChangeKey,
-  getCollapsedLinesCountBetween,
-  expandFromRawCode,
-  useSourceExpansion,
-  useMinCollapsedLines,
-} from "react-diff-view";
-import { refractor, detectLanguage } from "./diffHighlight";
-import "react-diff-view/style/index.css";
-import "./diffViewer.css";
-
-type FileData = ReturnType<typeof parseDiff>[number];
-type HunkType = FileData["hunks"][number];
-type ChangeType = HunkType["changes"][number];
-
-// 小于该行数的未改动间隙自动展开（避免出现「展开 1 行」这种碎片占位）
-const MIN_COLLAPSED_LINES = 8;
-// 稳定空数组引用，避免 hooks 依赖每次变化
-const EMPTY_HUNKS: HunkType[] = [];
+import { X, RotateCcw, ArrowUp, ArrowDown, FoldVertical, UnfoldVertical, Save } from "lucide-react";
+import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
+import { getMonacoTheme, getMonacoLanguage } from "../../utils/monacoSetup";
 
 interface DiffViewerModalProps {
   projectPath: string;
   filePath: string;
   status: string;
-  /** 提交模式：传入 commit SHA 时展示该提交内的文件 diff（只读，无回滚操作） */
+  /** 提交模式：传入 commit SHA 时展示该提交内的文件 diff（只读） */
   sha?: string;
   onClose: () => void;
   onRequestDiscard?: () => void;
+  /** 工作区模式存盘成功后回调（供外层刷新变更列表） */
+  onSaved?: () => void;
+  /** 右键「添加到对话」：把选区行号注入终端（与文件模块编辑器同款） */
+  onAddSelectionToConversation?: (startLine: number, endLine: number) => void;
 }
 
-export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
+export const DiffViewerModal: FC<DiffViewerModalProps> = ({
   projectPath,
   filePath,
   status,
   sha,
   onClose,
   onRequestDiscard,
+  onSaved,
+  onAddSelectionToConversation,
 }) => {
-  const [diffText, setDiffText] = useState<string>("");
-  const [oldSource, setOldSource] = useState<string>("");
+  const [original, setOriginal] = useState<string>("");
+  const [modified, setModified] = useState<string>("");
+  const [encoding, setEncoding] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [viewType, setViewType] = useState<"split" | "unified">(() =>
     localStorage.getItem("kkcoder_diff_view") === "unified" ? "unified" : "split"
   );
-  // 折叠未更改区域开关：true = 折叠（默认），false = 全文件展开
   const [collapseUnchanged, setCollapseUnchanged] = useState<boolean>(
     () => localStorage.getItem("kkcoder_diff_collapse") !== "off"
   );
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const currentChangeIdx = useRef(-1);
+
+  const [themeName] = useState(() => getMonacoTheme());
+  const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
+  const baselineRef = useRef<string>("");
+  const saveRef = useRef<() => Promise<void>>(async () => {});
+  const addToConvRef = useRef(onAddSelectionToConversation);
+  const changeIdxRef = useRef(-1);
+
+  useEffect(() => {
+    addToConvRef.current = onAddSelectionToConversation;
+  }, [onAddSelectionToConversation]);
 
   const fileName = filePath.split(/[\\/]/).pop() || filePath;
   const isUntracked = status === "U" || status === "??";
-  // 未跟踪文件与历史提交（只读）不可回滚
+  const isDeleted = status === "D";
+  // 工作区且文件存在于磁盘（删除态无法写回）→ 右侧可编辑
+  const editable = !sha && !isDeleted;
+  // 整文件“丢弃”：仅工作区已跟踪文件
   const canDiscard = !sha && !isUntracked;
+  const language = useMemo(() => getMonacoLanguage(filePath), [filePath]);
 
-  // ── 拉取 diff 文本 + 旧版全文（oldSource，供展开/折叠） ──
+  // ── 拉取两侧全文 ──
   useEffect(() => {
     let cancelled = false;
-
-    const fetchAll = async () => {
+    const run = async () => {
       setLoading(true);
       setError(null);
       try {
-        const diffPromise = sha
-          ? invoke<string>("git_commit_file_diff", { projectPath, sha, filePath })
-          : invoke<string>("git_get_file_diff", { projectPath, filePath, status });
-        // 旧版全文：工作区模式取 HEAD；提交模式取该提交的父（<sha>^）；未跟踪无旧版本
-        const rev = sha ? `${sha}^` : "HEAD";
-        const oldPromise = isUntracked
-          ? Promise.resolve("")
-          : invoke<string>("git_file_content", { projectPath, filePath, rev }).catch(() => "");
-
-        const [diff, old] = await Promise.all([diffPromise, oldPromise]);
-        if (!cancelled) {
-          setDiffText(diff);
-          setOldSource(old);
+        if (sha) {
+          // 提交模式：original=父提交，modified=该提交
+          const [orig, mod] = await Promise.all([
+            invoke<string>("git_file_content", { projectPath, filePath, rev: `${sha}^` }).catch(() => ""),
+            invoke<string>("git_file_content", { projectPath, filePath, rev: sha }).catch(() => ""),
+          ]);
+          if (!cancelled) {
+            setOriginal(orig);
+            setModified(mod);
+            setEncoding(undefined);
+          }
+        } else {
+          // 工作区模式：original=HEAD（未跟踪无旧版本），modified=磁盘（删除态为空）
+          const origP = isUntracked
+            ? Promise.resolve("")
+            : invoke<string>("git_file_content", { projectPath, filePath, rev: "HEAD" }).catch(() => "");
+          const modP = isDeleted
+            ? Promise.resolve({ content: "", encoding: "utf-8" })
+            : invoke<{ content: string; encoding: string }>("read_project_file_content", {
+                projectPath,
+                relativePath: filePath,
+              }).catch(() => ({ content: "", encoding: "utf-8" }));
+          const [orig, mod] = await Promise.all([origP, modP]);
+          if (!cancelled) {
+            setOriginal(orig);
+            setModified(mod.content);
+            setEncoding(mod.encoding);
+          }
         }
       } catch (e) {
         if (!cancelled) setError(String(e));
@@ -105,135 +121,141 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
         if (!cancelled) setLoading(false);
       }
     };
-
-    fetchAll();
+    run();
     return () => {
       cancelled = true;
     };
-  }, [projectPath, filePath, status, sha, isUntracked]);
+  }, [projectPath, filePath, status, sha, isUntracked, isDeleted]);
 
-  // ── 切换文件时清空行选择 ──
+  // 载入新内容后重置脏态基线
   useEffect(() => {
-    setSelectedKeys([]);
-  }, [diffText]);
+    baselineRef.current = modified;
+    setDirty(false);
+    changeIdxRef.current = -1;
+  }, [modified]);
 
-  // ── diff / 折叠态 / 视图变化时重置“当前更改”导航索引 ──
-  useEffect(() => {
-    currentChangeIdx.current = -1;
-  }, [diffText, collapseUnchanged, viewType]);
-
-  // ── ESC 关闭 ──
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  // ── 解析 diff ──
-  const parsedFile = useMemo<FileData | null>(() => {
-    if (!diffText) return null;
+  // ── 存盘（仅工作区可编辑） ──
+  const save = useCallback(async () => {
+    if (!editable) return;
+    const modEditor = diffEditorRef.current?.getModifiedEditor();
+    if (!modEditor) return;
+    const content = modEditor.getValue();
+    if (content === baselineRef.current) return;
+    setSaving(true);
     try {
-      const files = parseDiff(diffText);
-      return files.length > 0 ? files[0] : null;
-    } catch (err) {
-      console.error("[DiffViewer] 解析 diff 失败:", err);
-      return null;
+      await invoke("write_project_file_content", {
+        projectPath,
+        relativePath: filePath,
+        content,
+        encoding: encoding ?? null,
+      });
+      baselineRef.current = content;
+      setDirty(false);
+      onSaved?.();
+    } catch (e) {
+      setError("保存失败：" + String(e));
+    } finally {
+      setSaving(false);
     }
-  }, [diffText]);
+  }, [editable, projectPath, filePath, encoding, onSaved]);
 
-  const baseHunks = parsedFile?.hunks ?? EMPTY_HUNKS;
-  const oldLines = useMemo(() => (oldSource ? oldSource.split("\n") : []), [oldSource]);
+  useEffect(() => {
+    saveRef.current = save;
+  }, [save]);
 
-  // ── 展开/折叠（hooks 必须无条件调用，均以 oldSource 为源） ──
-  const [expandedHunks, expandRange] = useSourceExpansion(baseHunks, oldSource);
-  const collapsedHunks = useMinCollapsedLines(MIN_COLLAPSED_LINES, expandedHunks, oldSource);
-  // 全展开模式：把整份文件（1..N）填入，未更改区域全部铺开
-  const fullyExpandedHunks = useMemo(() => {
-    if (collapseUnchanged || oldLines.length === 0 || expandedHunks.length === 0) return null;
-    try {
-      return expandFromRawCode(expandedHunks, oldLines, 1, oldLines.length);
-    } catch {
-      return null;
-    }
-  }, [collapseUnchanged, oldLines, expandedHunks]);
-  const hunks = fullyExpandedHunks ?? collapsedHunks;
+  // ── Monaco 挂载：脏态跟踪 + Ctrl+S + 右键菜单精简（与文件模块编辑器一致，只留「添加到对话」） ──
+  const handleMount: DiffOnMount = (diffEditor, monaco) => {
+    diffEditorRef.current = diffEditor;
+    const modEditor = diffEditor.getModifiedEditor();
+    modEditor.onDidChangeModelContent(() => {
+      setDirty(modEditor.getValue() !== baselineRef.current);
+    });
+    modEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      void saveRef.current();
+    });
+    // diff 重算后重置块导航索引
+    diffEditor.onDidUpdateDiff(() => {
+      changeIdxRef.current = -1;
+    });
 
-  // ── 语法高亮 + 字符级行内高亮（markEdits） ──
-  const tokens = useMemo(() => {
-    if (!parsedFile || hunks.length === 0) return null;
-    const language = detectLanguage(fileName);
-    const enhancers = [markEdits(hunks, { type: "block" })];
-    try {
-      if (language) {
-        return tokenize(hunks, { highlight: true, refractor, language, enhancers });
-      }
-      return tokenize(hunks, { enhancers });
-    } catch (highlightErr) {
-      console.warn("[DiffViewer] 语法高亮失败，回退无高亮:", highlightErr);
+    // 左右两侧编辑器各有独立右键菜单，逐个处理：自建「添加到对话」 + 白名单过滤内置项。
+    // 注：addAction 注册的菜单项真实 id 为 "<editorId>:<descriptor.id>"（带实例前缀），
+    // 故用后缀匹配；包裹 _getMenuActions 过滤（防御式，失败则不过滤）。
+    const setupContextMenu = (ed: editor.IStandaloneCodeEditor) => {
+      ed.addAction({
+        id: "kkcoder.addToConversation",
+        label: "添加到对话",
+        contextMenuGroupId: "1_kkcoder",
+        contextMenuOrder: 1,
+        run: (e) => {
+          const sel = e.getSelection();
+          if (sel && !sel.isEmpty()) {
+            addToConvRef.current?.(sel.startLineNumber, sel.endLineNumber);
+          } else {
+            const pos = e.getPosition();
+            if (pos) addToConvRef.current?.(pos.lineNumber, pos.lineNumber);
+          }
+        },
+      });
       try {
-        return tokenize(hunks, { enhancers });
+        const isAllowed = (id?: string) =>
+          !!id &&
+          ["kkcoder.addToConversation"].some((k) => id === k || id.endsWith(":" + k));
+        const contextmenu = ed.getContribution("editor.contrib.contextmenu") as unknown as {
+          _getMenuActions?: (...args: unknown[]) => Array<{ id?: string }>;
+        } | null;
+        if (contextmenu && typeof contextmenu._getMenuActions === "function") {
+          const original = contextmenu._getMenuActions.bind(contextmenu);
+          contextmenu._getMenuActions = (...args: unknown[]) => {
+            const items = original(...args);
+            const filtered = items.filter((item) => isAllowed(item?.id));
+            // 安全兜底：若过滤后竟为空（版本差异导致 id 规则变化），则不过滤，避免菜单打不开
+            return filtered.length > 0 ? filtered : items;
+          };
+        }
       } catch {
-        return null;
+        /* 内部 API 不可用时退化为完整菜单 */
       }
-    }
-  }, [hunks, parsedFile, fileName]);
-
-  // ── 切换单个变更行选中（仅 insert/delete 可选） ──
-  const toggleSelect = useCallback(({ change }: { change: ChangeType | null }) => {
-    if (!change || change.type === "normal") return;
-    const key = getChangeKey(change);
-    setSelectedKeys((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-    );
-  }, []);
-
-  // ── 收集变更行 → 行号（回滚基于行号，对展开/折叠鲁棒） ──
-  const changeToLine = (change: ChangeType): { side: "old" | "new"; lineNumber: number } | null => {
-    if (change.type === "insert") return { side: "new", lineNumber: change.lineNumber };
-    if (change.type === "delete") return { side: "old", lineNumber: change.lineNumber };
-    return null;
+    };
+    setupContextMenu(modEditor);
+    setupContextMenu(diffEditor.getOriginalEditor());
   };
 
-  const collectSelectedLines = (): { side: "old" | "new"; lineNumber: number }[] => {
-    const result: { side: "old" | "new"; lineNumber: number }[] = [];
-    for (const hunk of hunks) {
-      for (const change of hunk.changes) {
-        if (change.type === "normal") continue;
-        if (!selectedKeys.includes(getChangeKey(change))) continue;
-        const line = changeToLine(change);
-        if (line) result.push(line);
-      }
-    }
-    return result;
-  };
+  // ── 视图 / 折叠开关：即时更新 options ──
+  const options = useMemo<editor.IStandaloneDiffEditorConstructionOptions>(
+    () => ({
+      readOnly: !editable,
+      originalEditable: false,
+      renderSideBySide: viewType === "split",
+      // 关掉窄宽度自动降级内联（默认断点 900px，弹窗宽度以内会导致并排切换失效），视图完全由按钮控制
+      useInlineViewWhenSpaceIsLimited: false,
+      renderMarginRevertIcon: editable, // 块级 ↩ 回滚箭头（仅可编辑时可点）
+      hideUnchangedRegions: {
+        enabled: collapseUnchanged,
+        minimumLineCount: 8, // 小于 8 行的未改间隙不折叠（避免碎片）
+        contextLineCount: 3,
+        revealLineCount: 20,
+      },
+      automaticLayout: true,
+      scrollBeyondLastLine: false,
+      minimap: { enabled: false },
+      fontSize: 12,
+      lineNumbersMinChars: 3,
+      ignoreTrimWhitespace: false, // 与 git 一致，保留空白差异
+      renderOverviewRuler: false,
+      scrollbar: { verticalScrollbarSize: 12, horizontalScrollbarSize: 12, useShadows: false },
+      padding: { top: 6, bottom: 6 },
+    }),
+    [editable, viewType, collapseUnchanged]
+  );
 
-  // ── 回滚整块改动（收集该 hunk 全部变更行 → 行级回滚，不依赖 hunk 索引） ──
-  const handleRevertHunk = async (hunk: HunkType) => {
-    const lines = hunk.changes
-      .map(changeToLine)
-      .filter((l): l is { side: "old" | "new"; lineNumber: number } => l !== null);
-    if (lines.length === 0) return;
-    try {
-      await invoke("git_revert_lines", { projectPath, diffText, selectedLines: lines });
-      onClose();
-    } catch {
-      setError("回滚失败，请刷新后重试");
-    }
-  };
-
-  // ── 行级回滚 ──
-  const handleRevertLines = async () => {
-    const selectedLines = collectSelectedLines();
-    if (selectedLines.length === 0) return;
-    try {
-      await invoke("git_revert_lines", { projectPath, diffText, selectedLines });
-      onClose();
-    } catch {
-      setError("回滚选中行失败，请刷新后重试");
-    }
-  };
+  useEffect(() => {
+    diffEditorRef.current?.updateOptions({
+      renderSideBySide: viewType === "split",
+      useInlineViewWhenSpaceIsLimited: false,
+      hideUnchangedRegions: { enabled: collapseUnchanged },
+    });
+  }, [viewType, collapseUnchanged]);
 
   const switchView = (v: "split" | "unified") => {
     setViewType(v);
@@ -248,121 +270,53 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
     });
   };
 
-  // ── 上一个 / 下一个更改：收集变更块起始行，滚动居中定位（对并排/内联/展开均适用） ──
-  const getChangeAnchors = (): HTMLElement[] => {
-    const root = bodyRef.current;
-    if (!root) return [];
-    const rows = Array.from(root.querySelectorAll("tr")) as HTMLElement[];
-    const anchors: HTMLElement[] = [];
-    let prevWasChange = false;
-    for (const row of rows) {
-      const isChange = !!row.querySelector(
-        ".diff-code-insert, .diff-code-delete, .diff-gutter-insert, .diff-gutter-delete"
-      );
-      if (isChange && !prevWasChange) anchors.push(row);
-      prevWasChange = isChange;
-    }
-    return anchors;
-  };
-
+  // ── 上一个/下一个更改：基于 diff 计算结果跳转并居中 ──
   const goToChange = (dir: 1 | -1) => {
-    const anchors = getChangeAnchors();
-    if (anchors.length === 0) return;
-    let idx = currentChangeIdx.current + dir;
-    if (idx < 0) idx = anchors.length - 1;
-    if (idx >= anchors.length) idx = 0;
-    currentChangeIdx.current = idx;
-    anchors[idx].scrollIntoView({ block: "center", behavior: "smooth" });
+    const de = diffEditorRef.current;
+    if (!de) return;
+    const changes = de.getLineChanges();
+    if (!changes || changes.length === 0) return;
+    let idx = changeIdxRef.current + dir;
+    if (idx < 0) idx = changes.length - 1;
+    if (idx >= changes.length) idx = 0;
+    changeIdxRef.current = idx;
+    const c = changes[idx];
+    const line = Math.max(1, c.modifiedStartLineNumber || c.modifiedEndLineNumber || 1);
+    const modEditor = de.getModifiedEditor();
+    modEditor.revealLineInCenter(line);
+    modEditor.setPosition({ lineNumber: line, column: 1 });
+    modEditor.focus();
   };
 
-  // ── 纯文本 fallback（diff 无法解析时） ──
-  const renderFallbackDiff = () => {
-    if (!diffText) return null;
-    return (
-      <pre className="diff-content">
-        {diffText.split("\n").map((line, idx) => {
-          let className = "diff-line";
-          if (line.startsWith("+") && !line.startsWith("+++")) className += " diff-line-add";
-          else if (line.startsWith("-") && !line.startsWith("---")) className += " diff-line-del";
-          else if (line.startsWith("@@")) className += " diff-hunk";
-          return (
-            <div key={idx} className={className}>
-              <span className="diff-line-content">{line || " "}</span>
-            </div>
-          );
-        })}
-      </pre>
-    );
-  };
-
-  // ── 展开占位条（点击展开一段未改动区域） ──
-  const oldLineCount = oldLines.length;
-
-  const renderExpandBar = (key: string, start: number, end: number, count: number) => (
-    <Decoration key={key}>
-      <button
-        type="button"
-        className="diff-expand-bar"
-        onClick={() => expandRange(start, end)}
-        title="展开这段未改动的代码"
-      >
-        ⋯ 展开 {count} 行未改动 ⋯
-      </button>
-    </Decoration>
-  );
-
-  // ── 渲染 hunks：间隙插展开条，每块头部显示 @@ + 回滚 ──
-  const renderHunks = (hunksToRender: HunkType[]): React.ReactElement[] => {
-    const elements: React.ReactElement[] = [];
-    hunksToRender.forEach((hunk, i) => {
-      const previous = i > 0 ? hunksToRender[i - 1] : null;
-      // 该 hunk 之前折叠的行数
-      const collapsed = previous
-        ? getCollapsedLinesCountBetween(previous, hunk)
-        : hunk.oldStart - 1;
-      if (oldSource && collapsed > 0) {
-        const start = previous ? previous.oldStart + previous.oldLines : 1;
-        const end = hunk.oldStart - 1;
-        elements.push(renderExpandBar(`expand-${hunk.content}`, start, end, collapsed));
-      }
-      elements.push(
-        <Decoration key={`deco-${hunk.content}`} contentClassName="diff-decoration-cell">
-          <div className="diff-decoration-row">
-            <span className="diff-hunk-content">{hunk.content}</span>
-            {canDiscard && (
-              <button
-                onClick={() => handleRevertHunk(hunk)}
-                className="diff-revert-hunk-btn"
-                title="回滚此块改动"
-              >
-                <RotateCcw size={11} />
-                回滚
-              </button>
-            )}
-          </div>
-        </Decoration>
-      );
-      elements.push(<Hunk key={`hunk-${hunk.content}`} hunk={hunk} />);
-    });
-    // 末尾折叠区
-    const last = hunksToRender[hunksToRender.length - 1];
-    if (oldSource && last) {
-      const start = last.oldStart + last.oldLines;
-      if (start <= oldLineCount) {
-        elements.push(renderExpandBar("expand-trailing", start, oldLineCount, oldLineCount - start + 1));
-      }
+  // ── 关闭（有未保存改动先确认） ──
+  const requestClose = useCallback(() => {
+    if (dirty) {
+      setConfirmClose(true);
+      return;
     }
-    return elements;
-  };
+    onClose();
+  }, [dirty, onClose]);
+
+  // ESC 关闭（编辑器内部的 ESC 交给 Monaco，如关闭查找框）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if ((e.target as HTMLElement | null)?.closest?.(".monaco-editor")) return;
+      requestClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [requestClose]);
 
   return (
-    <div className="diff-modal-overlay" onClick={onClose}>
+    <div className="diff-modal-overlay" onClick={requestClose}>
       <div className="diff-modal" onClick={(e) => e.stopPropagation()}>
         {/* 头部 */}
         <div className="diff-modal-header">
           <span className="diff-modal-title">
             {fileName}
             {sha && <span className="diff-modal-sha">@ {sha.slice(0, 7)}</span>}
+            {dirty && <span className="diff-dirty-dot" title="未保存的更改">●</span>}
           </span>
           <div className="diff-modal-actions">
             {/* 上一个/下一个更改 */}
@@ -378,7 +332,6 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
             <button
               className={`diff-icon-btn ${collapseUnchanged ? "on" : ""}`}
               onClick={toggleCollapse}
-              disabled={!oldSource}
               title={collapseUnchanged ? "展开全部未更改区域" : "折叠未更改区域"}
             >
               {collapseUnchanged ? <FoldVertical size={14} /> : <UnfoldVertical size={14} />}
@@ -400,6 +353,19 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
                 内联
               </button>
             </div>
+            {/* 保存（可编辑模式） */}
+            {editable && (
+              <button
+                className="diff-modal-btn"
+                onClick={() => void save()}
+                disabled={!dirty || saving}
+                title="保存 (Ctrl+S)"
+              >
+                <Save size={13} />
+                {saving ? "保存中…" : "保存"}
+              </button>
+            )}
+            {/* 整文件丢弃 */}
             {canDiscard && onRequestDiscard && (
               <button
                 className="diff-modal-btn"
@@ -413,56 +379,55 @@ export const DiffViewerModal: React.FC<DiffViewerModalProps> = ({
                 丢弃
               </button>
             )}
-            <button className="diff-modal-close" onClick={onClose}>
+            <button className="diff-modal-close" onClick={requestClose}>
               <X size={16} />
             </button>
           </div>
         </div>
 
-        {/* 内容 */}
-        <div className="diff-modal-body" ref={bodyRef}>
-          {loading ? (
-            <div className="diff-loading">加载 diff...</div>
-          ) : error ? (
+        {/* 内容：Monaco DiffEditor */}
+        <div className="diff-modal-body diff-editor-host">
+          {error ? (
             <div className="diff-error">{error}</div>
-          ) : diffText && parsedFile && hunks.length > 0 ? (
-            <div className="diff-viewer-container">
-              <Diff
-                viewType={viewType}
-                diffType={parsedFile.type}
-                hunks={hunks}
-                tokens={tokens ?? undefined}
-                selectedChanges={selectedKeys}
-                gutterEvents={canDiscard ? { onClick: toggleSelect } : undefined}
-              >
-                {(renderedHunks) => renderHunks(renderedHunks as unknown as HunkType[])}
-              </Diff>
-            </div>
-          ) : diffText ? (
-            renderFallbackDiff()
+          ) : loading ? (
+            <div className="diff-loading">加载 diff...</div>
           ) : (
-            <div className="diff-empty">无变更或无法解析 diff</div>
+            <DiffEditor
+              original={original}
+              modified={modified}
+              language={language}
+              theme={themeName}
+              options={options}
+              onMount={handleMount}
+              loading={<div className="diff-loading">加载编辑器…</div>}
+            />
           )}
         </div>
-
-        {/* 行级回滚操作条 */}
-        {canDiscard && parsedFile && selectedKeys.length > 0 && (
-          <div className="diff-revert-bar">
-            <span>已选 {selectedKeys.length} 行</span>
-            <button onClick={() => setSelectedKeys([])} className="diff-revert-bar-btn" title="取消选中">
-              取消
-            </button>
-            <button
-              onClick={handleRevertLines}
-              className="diff-revert-bar-btn danger"
-              title="回滚选中的行"
-            >
-              <RotateCcw size={11} />
-              回滚选中行
-            </button>
-          </div>
-        )}
       </div>
+
+      {/* 关闭前未保存确认 */}
+      {confirmClose && (
+        <div className="git-confirm-overlay" onClick={() => setConfirmClose(false)}>
+          <div className="git-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="git-confirm-title">放弃未保存的更改？</div>
+            <div className="git-confirm-desc">你在此文件中的编辑尚未保存，关闭将丢失这些改动。</div>
+            <div className="git-confirm-actions">
+              <button className="git-btn cancel" onClick={() => setConfirmClose(false)}>
+                继续编辑
+              </button>
+              <button
+                className="git-btn danger"
+                onClick={() => {
+                  setConfirmClose(false);
+                  onClose();
+                }}
+              >
+                放弃并关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -91,6 +91,8 @@ const COMMIT_FILE_STATUS_COLORS: Record<string, string> = {
 
 interface BranchPanelProps {
   projectPath: string;
+  /** diff 弹窗右键「添加到对话」：绝对路径 + 行号范围注入终端 */
+  onAddLinesToConversation?: (absolutePath: string, startLine: number, endLine: number) => void;
 }
 
 // watcher 启动失败时的轮询兜底间隔（与 GitPanel 保持一致）
@@ -195,7 +197,7 @@ const BranchRow: React.FC<{
 
 const COMMITS_PAGE_SIZE = 50;
 
-export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
+export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath, onAddLinesToConversation }) => {
   const [branches, setBranches] = useState<GitBranchItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1098,6 +1100,11 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath }) => {
           filePath={commitDiffFile.path}
           status={commitDiffFile.status}
           sha={commitDiffFile.sha}
+          onAddSelectionToConversation={
+            onAddLinesToConversation
+              ? (start, end) => onAddLinesToConversation(`${repoPath}/${commitDiffFile.path}`, start, end)
+              : undefined
+          }
           onClose={() => setCommitDiffFile(null)}
         />
       )}

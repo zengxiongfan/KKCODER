@@ -11,7 +11,7 @@ import { GitPanel } from "./components/git/GitPanel";
 import { BranchPanel } from "./components/git/BranchPanel";
 import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
-import { getHighlightedLines } from "./utils/highlighter";
+import { FileEditor, type FileEditorHandle } from "./components/FileEditor";
 import { FileText, Folder, GitBranch, GitCommit } from "lucide-react";
 import {
   addUnreadCompletion,
@@ -257,6 +257,7 @@ function App() {
   const [previewFile, setPreviewFile] = useState<{ 
     path: string; 
     content: string; 
+    encoding?: string;
     cannotPreview?: boolean;
     errorMsg?: string;
   } | null>(null);
@@ -869,9 +870,22 @@ function App() {
     insertConversationTagToActiveTerminal(data);
   }, [previewFile, activeSessionId, getSelectionLineRange, insertConversationTagToActiveTerminal]);
 
+  // Monaco 编辑器：脏态 + 保存句柄
+  const fileEditorRef = useRef<FileEditorHandle>(null);
+  const [fileDirty, setFileDirty] = useState(false);
+
+  // 由 Monaco 选区行号直接添加到对话（编辑模式下走此路径）
+  const handleAddLinesToConversation = useCallback((startLine: number, endLine: number) => {
+    if (!previewFile || !activeSessionId) return;
+    const rangeStr = startLine === endLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
+    insertConversationTagToActiveTerminal(`"${previewFile.path}":${rangeStr} `);
+  }, [previewFile, activeSessionId, insertConversationTagToActiveTerminal]);
+
   // 全局键盘快捷键绑定（Escape关闭, Ctrl+F查找, Ctrl+G跳转行, Ctrl+U选中添加到对话）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 事件源自 Monaco 编辑器内部时，完全交给 Monaco 接管键盘（Ctrl+F/G、Esc 等原生）
+      if ((e.target as HTMLElement | null)?.closest?.(".file-editor-monaco")) return;
       if (e.key === "Escape") {
         if (showFileSearchBar) {
           setShowFileSearchBar(false);
@@ -949,6 +963,7 @@ function App() {
 
   const handleFileClick = useCallback(async (relativePath: string) => {
     if (!activeSession?.path) return;
+    if (fileEditorRef.current?.isDirty() && !window.confirm("有未保存的更改，确定切换文件吗？")) return;
     setMdMode("source");
     
     if (relativePath.toLowerCase().endsWith(".svg")) {
@@ -962,11 +977,11 @@ function App() {
     }
 
     try {
-      const content = await invoke<string>("read_project_file_content", {
+      const result = await invoke<{ content: string; encoding: string }>("read_project_file_content", {
         projectPath: activeSession.path,
         relativePath
       });
-      setPreviewFile({ path: relativePath, content, cannotPreview: false });
+      setPreviewFile({ path: relativePath, content: result.content, encoding: result.encoding, cannotPreview: false });
     } catch (err: any) {
       setPreviewFile({
         path: relativePath,
@@ -982,6 +997,15 @@ function App() {
     const formatted = `"${absolutePath}" `;
     insertConversationTagToActiveTerminal(formatted);
   }, [insertConversationTagToActiveTerminal, toAbsolutePath]);
+
+  // Git 面板 diff 弹窗右键「添加到对话」：面板传入仓库绝对路径 + 行号范围
+  const handleAddGitLinesToConversation = useCallback(
+    (absolutePath: string, startLine: number, endLine: number) => {
+      const rangeStr = startLine === endLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
+      insertConversationTagToActiveTerminal(`"${absolutePath}":${rangeStr} `);
+    },
+    [insertConversationTagToActiveTerminal]
+  );
 
 
   // 处理文件内查找内容改变（更新匹配的行号列表和当前匹配项索引）
@@ -1047,11 +1071,6 @@ function App() {
       </>
     );
   };
-
-  const highlightedData = useMemo(() => {
-    if (!previewFile || previewFile.cannotPreview) return { tokens: [], isPlain: true };
-    return getHighlightedLines(previewFile.content, previewFile.path);
-  }, [previewFile]);
 
   const renderToken = (token: any, key: string | number): React.ReactNode => {
     if (!token.type) {
@@ -2527,15 +2546,24 @@ function App() {
                   <button 
                     className="preview-close-btn" 
                     onClick={() => {
+                      if (fileDirty && !window.confirm("有未保存的更改，确定关闭吗？")) return;
                       setPreviewFile(null);
                       setMdMode("source");
+                      setFileDirty(false);
                     }}
                     title="关闭文件预览"
                   >
                     ×
                   </button>
                 </div>
-                <div className="preview-body">
+                <div
+                  className={`preview-body${
+                    !previewFile.cannotPreview &&
+                    !(previewFile.path.endsWith(".md") && mdMode === "preview")
+                      ? " editor-host"
+                      : ""
+                  }`}
+                >
                   {previewFile.cannotPreview ? (
                     <div className="preview-error-container">
                       <div className="preview-error-icon">⚠️</div>
@@ -2561,33 +2589,19 @@ function App() {
                       dangerouslySetInnerHTML={{ __html: renderMarkdownToHtml(previewFile.content) }}
                     />
                   ) : (
-                    <div 
-                      className="preview-text-content"
-                      style={{
-                        fontFamily: previewFontFamily,
-                        fontSize: `${previewFontSize}px`
-                      }}
-                    >
-                      {highlightedData.tokens.map((lineTokens, idx) => {
-                        const lineNum = idx + 1;
-                        const isActiveMatchLine = matchedLines.length > 0 && 
-                          activeMatchIndex >= 0 && 
-                          activeMatchIndex < matchedLines.length && 
-                          matchedLines[activeMatchIndex] === lineNum;
-                        return (
-                          <div 
-                            key={idx} 
-                            className={`preview-code-line ${isActiveMatchLine ? "active-match-line" : ""}`} 
-                            data-line={lineNum}
-                          >
-                            <span className="line-number">{lineNum}</span>
-                            <span className="line-text">
-                              {lineTokens.length === 0 ? " " : lineTokens.map((t, tIdx) => renderToken(t, tIdx))}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <FileEditor
+                      ref={fileEditorRef}
+                      projectPath={activeSession?.path || ""}
+                      relativePath={previewFile.path}
+                      initialContent={previewFile.content}
+                      encoding={previewFile.encoding}
+                      readOnly={false}
+                      fontFamily={previewFontFamily}
+                      fontSize={previewFontSize}
+                      onDirtyChange={setFileDirty}
+                      onSaved={(content) => setPreviewFile((prev) => (prev ? { ...prev, content } : prev))}
+                      onAddSelectionToConversation={handleAddLinesToConversation}
+                    />
                   )}
                 </div>
 
@@ -2934,6 +2948,7 @@ function App() {
                     <GitPanel
                       projectPath={activeSession.path}
                       onInsertPathToTerminal={handleInsertPathToTerminal}
+                      onAddLinesToConversation={handleAddGitLinesToConversation}
                     />
                   ) : (
                     <div className="tree-placeholder-container">
@@ -2946,7 +2961,10 @@ function App() {
                   )
                 ) : (
                   activeSession && activeSession.path ? (
-                    <BranchPanel projectPath={activeSession.path} />
+                    <BranchPanel
+                      projectPath={activeSession.path}
+                      onAddLinesToConversation={handleAddGitLinesToConversation}
+                    />
                   ) : (
                     <div className="tree-placeholder-container">
                       <div className="tree-placeholder-icon">📂</div>

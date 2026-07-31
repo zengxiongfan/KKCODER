@@ -101,6 +101,8 @@ type GroupByMode = "list" | "directory" | "module";
 interface GitPanelProps {
   projectPath: string;
   onInsertPathToTerminal?: (relativePath: string) => void;
+  /** diff 弹窗右键「添加到对话」：绝对路径 + 行号范围注入终端 */
+  onAddLinesToConversation?: (absolutePath: string, startLine: number, endLine: number) => void;
 }
 
 // ─────────────────────────── 常量 ───────────────────────────
@@ -576,7 +578,7 @@ const GitTreeNodeRow: React.FC<{
 
 // ─────────────────────────── 主组件 ───────────────────────────
 
-export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToTerminal }) => {
+export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToTerminal, onAddLinesToConversation }) => {
   // ── 状态 ──
   const [changes, setChanges] = useState<GitFileChange[]>([]);
   const [branchStatus, setBranchStatus] = useState<GitBranchStatus | null>(null);
@@ -2093,6 +2095,12 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
           projectPath={repoPath}
           filePath={diffFile.path}
           status={diffFile.status}
+          onSaved={() => refresh()}
+          onAddSelectionToConversation={
+            onAddLinesToConversation
+              ? (start, end) => onAddLinesToConversation(`${repoPath}/${diffFile.path}`, start, end)
+              : undefined
+          }
           onClose={() => setDiffFile(null)}
           onRequestDiscard={() => {
             handleDiscardFile(diffFile.path, diffFile.status);
