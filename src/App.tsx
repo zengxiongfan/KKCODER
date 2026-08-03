@@ -269,13 +269,6 @@ function App() {
     const val = localStorage.getItem("kkcoder_setting_preview_font_size");
     return val ? parseFloat(val) : 12.5;
   });
-  // 预览区内部快捷查找与行号跳转状态
-  const [fileSearchQuery, setFileSearchQuery] = useState<string>("");
-  const [showFileSearchBar, setShowFileSearchBar] = useState<boolean>(false);
-  const [showGoToLineBar, setShowGoToLineBar] = useState<boolean>(false);
-  const [goToLineNumber, setGoToLineNumber] = useState<string>("");
-  const [activeMatchIndex, setActiveMatchIndex] = useState<number>(0);
-  const [matchedLines, setMatchedLines] = useState<number[]>([]);
   const [previewContextMenu, setPreviewContextMenu] = useState<{
     x: number;
     y: number;
@@ -727,7 +720,7 @@ function App() {
     let isInsidePreview = false;
     let curr: HTMLElement | null = container;
     while (curr && curr !== document.body) {
-      if (curr.classList && (curr.classList.contains("preview-body") || curr.classList.contains("file-preview-panel"))) {
+      if (curr.classList && (curr.classList.contains("preview-body") || curr.classList.contains("file-preview-modal"))) {
         isInsidePreview = true;
         break;
       }
@@ -796,17 +789,6 @@ function App() {
     });
   }, [previewFile]);
 
-  // 监听预览内匹配项列表和当前索引，自动滚动定位到当前匹配行
-  useEffect(() => {
-    if (matchedLines.length > 0 && activeMatchIndex >= 0 && activeMatchIndex < matchedLines.length) {
-      const lineNum = matchedLines[activeMatchIndex];
-      const el = document.querySelector(`.preview-code-line[data-line="${lineNum}"]`);
-      if (el) {
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
-    }
-  }, [activeMatchIndex, matchedLines]);
-
   // 从 Selection 提取起始行号 and 结束行号的通用工具函数
   const getSelectionLineRange = useCallback((selection: Selection) => {
     let startLine = Infinity;
@@ -864,11 +846,11 @@ function App() {
     const isSingleLine = startLine === endLine;
     const rangeStr = isSingleLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
     
-    // 路径用双引号，且行号后面要自带一个空格
-    const data = `"${previewFile.path}":${rangeStr} `;
+    // 路径用双引号（绝对路径，与文件树/diff 入口一致），且行号后面要自带一个空格
+    const data = `"${toAbsolutePath(previewFile.path)}":${rangeStr} `;
 
     insertConversationTagToActiveTerminal(data);
-  }, [previewFile, activeSessionId, getSelectionLineRange, insertConversationTagToActiveTerminal]);
+  }, [previewFile, activeSessionId, getSelectionLineRange, insertConversationTagToActiveTerminal, toAbsolutePath]);
 
   // Monaco 编辑器：脏态 + 保存句柄
   const fileEditorRef = useRef<FileEditorHandle>(null);
@@ -878,28 +860,25 @@ function App() {
   const handleAddLinesToConversation = useCallback((startLine: number, endLine: number) => {
     if (!previewFile || !activeSessionId) return;
     const rangeStr = startLine === endLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
-    insertConversationTagToActiveTerminal(`"${previewFile.path}":${rangeStr} `);
-  }, [previewFile, activeSessionId, insertConversationTagToActiveTerminal]);
+    insertConversationTagToActiveTerminal(`"${toAbsolutePath(previewFile.path)}":${rangeStr} `);
+  }, [previewFile, activeSessionId, insertConversationTagToActiveTerminal, toAbsolutePath]);
 
-  // 全局键盘快捷键绑定（Escape关闭, Ctrl+F查找, Ctrl+G跳转行, Ctrl+U选中添加到对话）
+  // 关闭文件弹窗（有未保存改动先确认）
+  const closePreview = useCallback(() => {
+    if (fileDirty && !window.confirm("有未保存的更改，确定关闭吗？")) return;
+    setPreviewFile(null);
+    setMdMode("source");
+    setFileDirty(false);
+  }, [fileDirty]);
+
+  // 全局键盘快捷键绑定（Esc 关闭文件弹窗；Ctrl+A/Ctrl+U 作用于 Markdown 预览等非编辑器内容）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // 事件源自 Monaco 编辑器内部时，完全交给 Monaco 接管键盘（Ctrl+F/G、Esc 等原生）
       if ((e.target as HTMLElement | null)?.closest?.(".file-editor-monaco")) return;
       if (e.key === "Escape") {
-        if (showFileSearchBar) {
-          setShowFileSearchBar(false);
-          setFileSearchQuery("");
-          e.preventDefault();
-          e.stopPropagation();
-        } else if (showGoToLineBar) {
-          setShowGoToLineBar(false);
-          setGoToLineNumber("");
-          e.preventDefault();
-          e.stopPropagation();
-        } else if (previewFile) {
-          setPreviewFile(null);
-          setMdMode("source");
+        if (previewFile) {
+          closePreview();
           e.preventDefault();
           e.stopPropagation();
         }
@@ -910,7 +889,7 @@ function App() {
         // Ctrl + A 全选限制在预览框中
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
           const selection = window.getSelection();
-          const previewPanel = document.querySelector(".file-preview-panel");
+          const previewPanel = document.querySelector(".file-preview-modal");
           if (previewPanel && selection && selection.anchorNode && previewPanel.contains(selection.anchorNode)) {
             e.preventDefault();
             e.stopPropagation();
@@ -927,26 +906,6 @@ function App() {
           }
         }
 
-        // Ctrl + F 文件内查找
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
-          e.preventDefault();
-          setShowFileSearchBar(true);
-          setShowGoToLineBar(false);
-          setTimeout(() => {
-            const input = document.getElementById("file-search-input");
-            if (input) input.focus();
-          }, 50);
-        }
-        // Ctrl + G 跳转到指定行号
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
-          e.preventDefault();
-          setShowGoToLineBar(true);
-          setShowFileSearchBar(false);
-          setTimeout(() => {
-            const input = document.getElementById("go-to-line-input");
-            if (input) input.focus();
-          }, 50);
-        }
         // Ctrl + U 选中内容添加到对话
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
           const selection = window.getSelection();
@@ -959,7 +918,7 @@ function App() {
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [previewFile, showFileSearchBar, showGoToLineBar, goToLineNumber, fileSearchQuery, matchedLines, activeMatchIndex, handleAddToConversationFromSelection]);
+  }, [previewFile, closePreview, handleAddToConversationFromSelection]);
 
   const handleFileClick = useCallback(async (relativePath: string) => {
     if (!activeSession?.path) return;
@@ -1008,85 +967,11 @@ function App() {
   );
 
 
-  // 处理文件内查找内容改变（更新匹配的行号列表和当前匹配项索引）
-  const handleFileSearchChange = (query: string) => {
-    setFileSearchQuery(query);
-    if (!query.trim() || !previewFile) {
-      setMatchedLines([]);
-      setActiveMatchIndex(0);
-      return;
-    }
-    const lines = previewFile.content.split("\n");
-    const matched: number[] = [];
-    const lowerQuery = query.toLowerCase();
-    lines.forEach((line, idx) => {
-      if (line.toLowerCase().includes(lowerQuery)) {
-        matched.push(idx + 1);
-      }
-    });
-    setMatchedLines(matched);
-    setActiveMatchIndex(matched.length > 0 ? 0 : -1);
-  };
 
-  // 处理跳转到行号逻辑（闪烁并滚动定位到该行）
-  const handleGoToLine = () => {
-    const lineNum = parseInt(goToLineNumber, 10);
-    if (isNaN(lineNum) || !previewFile) return;
-    
-    const totalLines = previewFile.content.split("\n").length;
-    const target = Math.max(1, Math.min(totalLines, lineNum));
-    
-    const el = document.querySelector(`.preview-code-line[data-line="${target}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-      el.classList.add("line-highlight-pulse");
-      setTimeout(() => {
-        el.classList.remove("line-highlight-pulse");
-      }, 1500);
-    }
-    setShowGoToLineBar(false);
-    setGoToLineNumber("");
-  };
 
-  // 辅助防正则注入函数
-  const escapeRegExp = (str: string) => {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  };
 
-  // 渲染高亮的匹配行文本
-  const renderHighlightedLineText = (lineText: string) => {
-    if (!fileSearchQuery.trim()) return lineText || " ";
-    const parts = lineText.split(new RegExp(`(${escapeRegExp(fileSearchQuery)})`, "gi"));
-    return (
-      <>
-        {parts.map((part, index) => 
-          part.toLowerCase() === fileSearchQuery.toLowerCase() ? (
-            <mark key={index} className="search-highlight-mark">
-              {part}
-            </mark>
-          ) : (
-            part
-          )
-        )}
-      </>
-    );
-  };
 
-  const renderToken = (token: any, key: string | number): React.ReactNode => {
-    if (!token.type) {
-      return renderHighlightedLineText(token.content);
-    }
 
-    const content = Array.isArray(token.content)
-      ? token.content.map((child: any, i: number) => renderToken(child, i))
-      : renderHighlightedLineText(token.content);
-
-    return (
-      <span key={key} className={`token ${token.type}`}>
-        {content}
-      </span>
-    );
-  };
 
   // 记住最后的会话和打开的 Tab 标签页
   useEffect(() => {
@@ -2513,10 +2398,12 @@ function App() {
 
             {/* 右侧文件/Markdown 预览面板 */}
             {previewFile && (
-              <div 
-                className="file-preview-panel"
-                onContextMenu={handlePreviewContextMenu}
-              >
+              <div className="file-preview-overlay" onClick={closePreview}>
+                <div
+                  className="file-preview-modal"
+                  onClick={(e) => e.stopPropagation()}
+                  onContextMenu={handlePreviewContextMenu}
+                >
                 <div className="preview-header">
                   <div className="preview-title-area">
                     <FileText size={14} className="preview-file-icon" />
@@ -2543,14 +2430,9 @@ function App() {
                       </button>
                     </div>
                   )}
-                  <button 
-                    className="preview-close-btn" 
-                    onClick={() => {
-                      if (fileDirty && !window.confirm("有未保存的更改，确定关闭吗？")) return;
-                      setPreviewFile(null);
-                      setMdMode("source");
-                      setFileDirty(false);
-                    }}
+                  <button
+                    className="preview-close-btn"
+                    onClick={closePreview}
                     title="关闭文件预览"
                   >
                     ×
@@ -2605,100 +2487,7 @@ function App() {
                   )}
                 </div>
 
-                {/* 悬浮文件内查找输入栏 */}
-                {showFileSearchBar && (
-                  <div className="file-search-bar-floating">
-                    <input 
-                      id="file-search-input"
-                      type="text" 
-                      placeholder="查找内容..." 
-                      className="file-search-bar-input"
-                      value={fileSearchQuery}
-                      onChange={(e) => handleFileSearchChange(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          if (e.shiftKey) {
-                            if (matchedLines.length > 0) {
-                              setActiveMatchIndex(prev => (prev - 1 + matchedLines.length) % matchedLines.length);
-                            }
-                          } else {
-                            if (matchedLines.length > 0) {
-                              setActiveMatchIndex(prev => (prev + 1) % matchedLines.length);
-                            }
-                          }
-                        }
-                      }}
-                    />
-                    <span className="file-search-bar-count">
-                      {matchedLines.length > 0 ? `${activeMatchIndex + 1}/${matchedLines.length}` : "0/0"}
-                    </span>
-                    <button 
-                      className="file-search-bar-nav-btn"
-                      onClick={() => {
-                        if (matchedLines.length > 0) {
-                          setActiveMatchIndex(prev => (prev - 1 + matchedLines.length) % matchedLines.length);
-                        }
-                      }}
-                      title="上一个"
-                    >
-                      ▲
-                    </button>
-                    <button 
-                      className="file-search-bar-nav-btn"
-                      onClick={() => {
-                        if (matchedLines.length > 0) {
-                          setActiveMatchIndex(prev => (prev + 1) % matchedLines.length);
-                        }
-                      }}
-                      title="下一个"
-                    >
-                      ▼
-                    </button>
-                    <button 
-                      className="file-search-bar-close-btn"
-                      onClick={() => {
-                        setShowFileSearchBar(false);
-                        setFileSearchQuery("");
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-
-                {/* 悬浮跳转行号输入栏 */}
-                {showGoToLineBar && (
-                  <div className="file-search-bar-floating go-to-line-bar">
-                    <input 
-                      id="go-to-line-input"
-                      type="text" 
-                      placeholder="输入行号并回车..." 
-                      className="file-search-bar-input"
-                      value={goToLineNumber}
-                      onChange={(e) => setGoToLineNumber(e.target.value.replace(/\D/g, ""))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleGoToLine();
-                        }
-                      }}
-                    />
-                    <button 
-                      className="file-search-bar-go-btn"
-                      onClick={handleGoToLine}
-                    >
-                      跳转
-                    </button>
-                    <button 
-                      className="file-search-bar-close-btn"
-                      onClick={() => {
-                        setShowGoToLineBar(false);
-                        setGoToLineNumber("");
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
+                </div>
               </div>
             )}
           </div>

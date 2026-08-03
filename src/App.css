@@ -3294,20 +3294,29 @@ input:checked + .switch-slider:before {
   margin: 4px 0;
 }
 
-/* 文件预览并排分屏面板 */
-.file-preview-panel {
-  width: 50%;
-  border-left: 1px solid var(--border-color);
+/* 文件查看/编辑弹窗：居中遮罩层（对齐 diff 弹窗观感） */
+.file-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
-  flex-direction: column;
-  height: 100%;
-  background-color: var(--bg-main);
-  animation: slideInRightPreview 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: diff-fade-in 0.15s ease;
 }
 
-@keyframes slideInRightPreview {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+.file-preview-modal {
+  width: 80vw;
+  max-width: 1100px;
+  height: 82vh;
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
 }
 
 .preview-header {

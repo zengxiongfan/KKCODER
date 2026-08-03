@@ -486,8 +486,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           const hasOpenPanel = !!(
             document.querySelector(".modal-overlay.show") ||
             document.querySelector(".theme-dropdown") ||
-            document.querySelector(".file-search-bar-floating") ||
-            document.querySelector(".file-preview-panel")
+            document.querySelector(".file-preview-modal")
           );
           if (hasOpenPanel) {
             // 允许事件冒泡至 window，以便全局按键监听器可以关闭面板/弹窗
