@@ -245,9 +245,24 @@ function App() {
   });
   const [isResizingProjectTree, setIsResizingProjectTree] = useState<boolean>(false);
   const projectTreeAsideRef = useRef<HTMLElement>(null);
-  const [showProjectTree, setShowProjectTree] = useState<boolean>(() => {
-    return localStorage.getItem("kkcoder_show_project_tree") === "true";
-  });
+  // 右侧项目树默认收起，不做全局记忆：每次启动都保持关闭，由用户手动打开（仅当次会话内保持打开状态）
+  const [showProjectTree, setShowProjectTree] = useState<boolean>(false);
+  const updateProjectTreeVisibility = useCallback((visible: boolean) => {
+    // 仅当次会话内记忆开关状态，不做持久化：每次启动右侧面板始终收起
+    setShowProjectTree(visible);
+
+    if (visible) {
+      // 抽屉打开后不再让标题栏按钮持有焦点，避免键盘输入误落到隐藏在抽屉后的终端区域。
+      window.requestAnimationFrame(() => {
+        (document.activeElement as HTMLElement | null)?.blur?.();
+      });
+    } else {
+      // 抽屉关闭不会改变终端尺寸，只恢复当前终端输入焦点。
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(new Event("kkcoder-focus-active-terminal"));
+      });
+    }
+  }, []);
   // 右侧面板 Tab 切换：'files' = 项目文件树, 'git' = Git 变更面板, 'branches' = Git 分支面板
   const [rightPanelTab, setRightPanelTab] = useState<"files" | "git" | "branches">(() => {
     const saved = localStorage.getItem("kkcoder_right_panel_tab");
@@ -284,16 +299,12 @@ function App() {
       const newWidth = Math.max(200, Math.min(500, window.innerWidth - e.clientX));
       setProjectTreeWidth(newWidth);
       localStorage.setItem("kkcoder_project_tree_width", newWidth.toString());
-      window.dispatchEvent(new Event("resize"));
     };
 
     const handleMouseUp = () => {
       setIsResizingProjectTree(false);
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
-      setTimeout(() => {
-        window.dispatchEvent(new Event("resize"));
-      }, 50);
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -306,6 +317,29 @@ function App() {
       document.body.style.cursor = "";
     };
   }, [isResizingProjectTree]);
+
+  // 覆盖式工作区抽屉优先于终端处理 Escape；文件预览、主题菜单和模态框保持更高关闭优先级。
+  useEffect(() => {
+    if (!showProjectTree) return;
+
+    const handleProjectTreeEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (
+        document.querySelector(".modal-overlay.show") ||
+        document.querySelector(".theme-dropdown") ||
+        document.querySelector(".file-preview-modal")
+      ) {
+        return;
+      }
+
+      updateProjectTreeVisibility(false);
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+
+    window.addEventListener("keydown", handleProjectTreeEscape, true);
+    return () => window.removeEventListener("keydown", handleProjectTreeEscape, true);
+  }, [showProjectTree, updateProjectTreeVisibility]);
 
   useEffect(() => {
     const handleFontChange = (e: Event) => {
@@ -1955,9 +1989,7 @@ function App() {
             <button
               className={`titlebar-btn toggle-project-tree-btn ${showProjectTree ? "active" : ""}`}
               onClick={() => {
-                const newVal = !showProjectTree;
-                setShowProjectTree(newVal);
-                localStorage.setItem("kkcoder_show_project_tree", String(newVal));
+                updateProjectTreeVisibility(!showProjectTree);
               }}
               title={showProjectTree ? "关闭工作区面板" : "打开工作区面板"}
             >
@@ -2505,8 +2537,14 @@ function App() {
           );
         })()}
 
-        {showProjectTree && !activeSession?.isTemp && (
-          <>
+        {!activeSession?.isTemp && (
+          <div
+            className={`project-workspace-drawer ${showProjectTree ? "open" : "closed"} ${
+              isResizingProjectTree ? "resizing" : ""
+            }`}
+            style={{ width: `${projectTreeWidth}px` }}
+            aria-hidden={!showProjectTree}
+          >
             <div 
               className={`project-tree-resizer ${isResizingProjectTree ? "dragging" : ""}`} 
               onMouseDown={startProjectTreeResize} 
@@ -2515,7 +2553,6 @@ function App() {
             <aside
               ref={projectTreeAsideRef}
               className={`project-tree-aside${projectTreeWidth < 250 ? " narrow" : ""}`}
-              style={{ width: `${projectTreeWidth}px` }}
             >
               <div className="project-tree-aside-header">
                 <div className="aside-tabs">
@@ -2610,7 +2647,7 @@ function App() {
                 )}
               </div>
             </aside>
-          </>
+          </div>
         )}
 
       </div>

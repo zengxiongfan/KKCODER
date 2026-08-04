@@ -30,6 +30,7 @@ fn log_to_file(message: &str) {
 pub struct ActiveSession {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
+    last_size: Arc<Mutex<(u16, u16)>>,
     spawn_token: u64,
     /// Claude Code 的 session UUID / Codex 的 session UUID（用于 reopen 精确恢复）
     pub agent_session_id: String,
@@ -1116,6 +1117,7 @@ fn spawn_terminal(
     })?;
     log_to_file("Master reader cloned.");
     let master_shared = Arc::new(Mutex::new(master));
+    let last_size_shared = Arc::new(Mutex::new((pty_cols, pty_rows)));
 
     // 自动运行 Agent CLI 脚本
     // 自动运行 Agent CLI 脚本
@@ -1225,15 +1227,27 @@ fn spawn_terminal(
         // 创建 resize 通道，后台线程接收 resize 命令并执行
         let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel::<(u16, u16)>(8);
         let master_for_resize = master_shared.clone();
+        let last_size_for_resize = last_size_shared.clone();
         std::thread::spawn(move || {
             while let Some((cols, rows)) = resize_rx.blocking_recv() {
+                let Ok(mut last_size) = last_size_for_resize.lock() else {
+                    continue;
+                };
+                if *last_size == (cols, rows) {
+                    continue;
+                }
+
                 if let Ok(m) = master_for_resize.lock() {
-                    let _ = m.resize(portable_pty::PtySize {
+                    if m.resize(portable_pty::PtySize {
                         rows,
                         cols,
                         pixel_width: 0,
                         pixel_height: 0,
-                    });
+                    })
+                    .is_ok()
+                    {
+                        *last_size = (cols, rows);
+                    }
                 }
             }
         });
@@ -1363,6 +1377,7 @@ fn spawn_terminal(
         ActiveSession {
             master: master_shared.clone(),
             writer: writer.clone(),
+            last_size: last_size_shared,
             spawn_token,
             agent_session_id: agent_session_id.clone(),
         },
@@ -1407,13 +1422,21 @@ fn resize_terminal(
 ) -> Result<(), String> {
     let sessions = state.sessions.lock().unwrap();
     if let Some(session) = sessions.get(&session_id) {
+        let mut last_size = session.last_size.lock().map_err(|e| e.to_string())?;
+        if *last_size == (cols, rows) {
+            return Ok(());
+        }
+
         let master = session.master.lock().map_err(|e| e.to_string())?;
-        master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        }).map_err(|e: anyhow::Error| e.to_string())?;
+        master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e: anyhow::Error| e.to_string())?;
+        *last_size = (cols, rows);
         Ok(())
     } else {
         Err(format!("会话 {} 不存在", session_id))

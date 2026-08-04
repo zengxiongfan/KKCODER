@@ -2970,7 +2970,37 @@ input:checked + .switch-slider:before {
    右侧项目树与分屏文件/Markdown 预览专属样式系统
    ========================================================================== */
 
+.project-workspace-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  transform: translateX(calc(100% + 4px));
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform 0.18s ease,
+    visibility 0s linear 0.18s;
+  will-change: transform;
+}
+
+.project-workspace-drawer.open {
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    transform 0.18s ease,
+    visibility 0s linear 0s;
+}
+
+.project-workspace-drawer.resizing {
+  transition: none;
+}
+
 .project-tree-aside {
+  width: 100%;
   background-color: var(--bg-sidebar);
   border-left: 1px solid var(--border-color);
   display: flex;
@@ -2979,6 +3009,7 @@ input:checked + .switch-slider:before {
   height: 100%;
   overflow-x: hidden; /* 禁止横向滚动：内容自适应/截断，头部永不被滱出视口 */
   overflow-y: hidden;
+  box-shadow: -10px 0 28px rgba(0, 0, 0, 0.22);
 }
 
 .project-tree-aside-header {
@@ -3199,12 +3230,16 @@ input:checked + .switch-slider:before {
 }
 
 .project-tree-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
   width: 4px;
   min-width: 4px;
   cursor: col-resize;
   background-color: transparent;
   transition: background-color 0.15s ease;
-  z-index: 10;
+  z-index: 41;
 }
 
 .project-tree-resizer:hover,

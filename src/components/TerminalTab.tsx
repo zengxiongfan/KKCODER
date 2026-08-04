@@ -75,6 +75,19 @@ interface AtomicInputTag {
   text: string;
 }
 
+interface TerminalSize {
+  cols: number;
+  rows: number;
+}
+
+interface TerminalFitOptions {
+  focus?: boolean;
+  forceScrollToBottom?: boolean;
+  forcePtySync?: boolean;
+}
+
+type TerminalFitScheduler = (reason: string, options?: TerminalFitOptions) => void;
+
 const getTextCharLength = (text: string) => Array.from(text).length;
 
 const sliceTextByChars = (text: string, start: number, end?: number) => {
@@ -99,6 +112,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const isActiveRef = useRef(Boolean(isActive));
+  const ptyReadyRef = useRef(false);
+  const lastSentSizeRef = useRef<TerminalSize | null>(null);
+  const pendingSizeRef = useRef<TerminalSize | null>(null);
+  const scheduleTerminalFitRef = useRef<TerminalFitScheduler>(() => {});
+
+  // 初始化终端的 effect 不能依赖 isActive，否则切换标签会销毁 xterm；通过 ref 提供最新状态。
+  isActiveRef.current = Boolean(isActive);
 
   const onCommandCompleteRef = useRef(onCommandComplete);
   useEffect(() => {
@@ -279,7 +300,18 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   }, [busy, sessionId]);
 
   useEffect(() => {
-    let resizeTimeout: any = null;
+    let fitDebounceTimer: number | null = null;
+    let fitAnimationFrame: number | null = null;
+    let pendingFitOptions: Required<TerminalFitOptions> & { reason: string } = {
+      focus: false,
+      forceScrollToBottom: false,
+      forcePtySync: false,
+      reason: "initial",
+    };
+
+    ptyReadyRef.current = false;
+    lastSentSizeRef.current = null;
+    pendingSizeRef.current = null;
 
     log(`useEffect triggered: directory=${directory}, agentType=${agentType}, isReopen=${isReopen}`);
     if (!terminalRef.current) {
@@ -419,6 +451,106 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     } catch (e) {
       log(`Failed to measure initial terminal dimensions before spawn: ${e}`);
     }
+
+    const syncPtySize = (cols: number, rows: number, reason: string, force = false) => {
+      if (cols < 20 || rows < 5) {
+        log(`Ignore invalid terminal dimensions: cols=${cols}, rows=${rows}, reason=${reason}`);
+        return;
+      }
+
+      const nextSize = { cols, rows };
+      pendingSizeRef.current = nextSize;
+
+      if (!ptyReadyRef.current || !isActiveRef.current) {
+        return;
+      }
+
+      const previous = lastSentSizeRef.current;
+      if (!force && previous?.cols === cols && previous?.rows === rows) {
+        return;
+      }
+
+      lastSentSizeRef.current = nextSize;
+      log(`Syncing terminal dimensions: cols=${cols}, rows=${rows}, reason=${reason}, force=${force}`);
+      invoke("resize_terminal", { sessionId, cols, rows }).catch((err) => {
+        const lastSent = lastSentSizeRef.current;
+        if (lastSent?.cols === cols && lastSent?.rows === rows) {
+          lastSentSizeRef.current = null;
+        }
+        log(`resize_terminal error: ${err}`);
+      });
+    };
+
+    const scheduleTerminalFit: TerminalFitScheduler = (reason, options = {}) => {
+      pendingFitOptions = {
+        focus: pendingFitOptions.focus || Boolean(options.focus),
+        forceScrollToBottom:
+          pendingFitOptions.forceScrollToBottom || Boolean(options.forceScrollToBottom),
+        forcePtySync: pendingFitOptions.forcePtySync || Boolean(options.forcePtySync),
+        reason,
+      };
+
+      if (fitDebounceTimer !== null) {
+        window.clearTimeout(fitDebounceTimer);
+      }
+      if (fitAnimationFrame !== null) {
+        window.cancelAnimationFrame(fitAnimationFrame);
+        fitAnimationFrame = null;
+      }
+
+      // 合并 display 切换、ResizeObserver 和字体变化，只在布局稳定后测量一次。
+      fitDebounceTimer = window.setTimeout(() => {
+        fitDebounceTimer = null;
+        fitAnimationFrame = window.requestAnimationFrame(() => {
+          fitAnimationFrame = null;
+          const scheduledOptions = pendingFitOptions;
+          pendingFitOptions = {
+            focus: false,
+            forceScrollToBottom: false,
+            forcePtySync: false,
+            reason: "idle",
+          };
+
+          if (!isActiveRef.current || !terminalRef.current) {
+            return;
+          }
+
+          const rect = terminalRef.current.getBoundingClientRect();
+          if (rect.width <= 0 || rect.height <= 0) {
+            return;
+          }
+
+          try {
+            const activeBuffer = term.buffer.active;
+            const wasAtBottom = activeBuffer.viewportY >= activeBuffer.baseY;
+            const sizeBeforeFit = { cols: term.cols, rows: term.rows };
+            fitAddon.fit();
+            const fitChangedSize =
+              sizeBeforeFit.cols !== term.cols || sizeBeforeFit.rows !== term.rows;
+            syncPtySize(
+              term.cols,
+              term.rows,
+              scheduledOptions.reason,
+              // fit 改变尺寸时 onResize 已进入同步通道；只有尺寸未变时才强制核对后端状态。
+              scheduledOptions.forcePtySync && !fitChangedSize,
+            );
+
+            if (scheduledOptions.forceScrollToBottom || wasAtBottom) {
+              term.scrollToBottom();
+            }
+            if (scheduledOptions.focus) {
+              term.focus();
+            }
+          } catch (err) {
+            log(`Terminal fit failed (${scheduledOptions.reason}): ${err}`);
+          }
+        });
+      }, 60);
+    };
+
+    scheduleTerminalFitRef.current = scheduleTerminalFit;
+    xtermRef.current = term;
+    fitAddonRef.current = fitAddon;
 
     // 绑定自定义键盘按键处理器：支持 Ctrl+C 进行快捷复制且禁用退出命令，支持 Ctrl+V 完美粘贴且阻断重复
     const pruneAtomicInputTags = () => {
@@ -656,23 +788,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       }
     });
     
-    // 延迟少许等 DOM 渲染完成后精准测量尺寸
-    log("Scheduling initial fit addon measurement (100ms)...");
-    setTimeout(() => {
-      try {
-        log("Executing fitAddon.fit()");
-        fitAddon.fit();
-        term.scrollToBottom(); // 确保初次加载和挂载时视口强制滚动到最下方
-        log("fitAddon.fit() completed.");
-      } catch (e) {
-        log(`Error running fitAddon.fit(): ${e}`);
-        console.error(e);
-      }
-    }, 100);
-
-    xtermRef.current = term;
-    fitAddonRef.current = fitAddon;
-
     let unlistenFn: (() => void) | null = null;
     let listenerCancelled = false; // 防范异步 listener 竞态：cleanup 后短路
     let lastSeq: number = 0; // 用于检测并丢弃重复包（防范 ConPTY 屏幕缓冲区重发）
@@ -833,12 +948,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         });
     });
 
-    // 4. 监听终端自身的 resize 事件并同步到 PTY
-    log("Binding term.onResize to resize_terminal...");
+    // 4. 所有 xterm 尺寸变化都进入同一个带去重的 PTY 同步通道
+    log("Binding term.onResize to deduplicated terminal size sync...");
     const onResizeDisposable = term.onResize(({ cols, rows }) => {
-      invoke("resize_terminal", { sessionId, cols, rows }).catch((err) => {
-        log(`resize_terminal error: ${err}`);
-      });
+      syncPtySize(cols, rows, "xterm-on-resize");
     });
 
     // 5. 调用 Rust spawn_terminal 接口拉起后端 PTY 进程
@@ -854,71 +967,32 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     })
       .then(() => {
         log("Backend spawn_terminal resolved successfully.");
+        ptyReadyRef.current = true;
         if (onSpawned) {
           onSpawned();
         }
-        // PTY 成功拉起后，强制执行 fit，随后再 proposeDimensions 尺寸同步给 PTY
-        try {
-          fitAddon.fit();
-          const dims = fitAddon.proposeDimensions();
-          if (dims) {
-            log(`Proposing terminal dimensions: cols=${dims.cols}, rows=${dims.rows}`);
-            invoke("resize_terminal", {
-              sessionId,
-              cols: dims.cols,
-              rows: dims.rows,
-            }).catch((err) => log(`Initial resize_terminal error: ${err}`));
-          }
-        } catch (e) {
-          log(`Error proposing dimensions: ${e}`);
-          console.error(e);
+
+        // 若 PTY 启动期间发生过本地尺寸变化，在后端就绪后统一补发一次。
+        if (isActiveRef.current) {
+          const pendingSize = pendingSizeRef.current ?? { cols: term.cols, rows: term.rows };
+          syncPtySize(pendingSize.cols, pendingSize.rows, "pty-spawn-ready", true);
+          scheduleTerminalFit("pty-spawn-ready", { forceScrollToBottom: true });
         }
       })
       .catch((err) => {
+        ptyReadyRef.current = false;
         log(`Backend spawn_terminal REJECTED: ${err}`);
         term.write(
           `\r\n\x1b[31m[KKCoder 核心错误] 无法拉起本地虚拟终端: ${err}\x1b[0m\r\n`
         );
       });
 
-    // 6. 使用 ResizeObserver 监听容器尺寸的物理变化，比 window.resize 更加灵敏和靠谱
-    const handleResize = () => {
-      if (resizeTimeout) {
-        clearTimeout(resizeTimeout);
-      }
-      resizeTimeout = setTimeout(() => {
-        try {
-          if (!isActive) {
-            // 如果该 Tab 当前处于非激活状态 (display: none)，则直接跳过 fit，防范缩成 0 行的 bug
-            return;
-          }
-          fitAddon.fit();
-          term.scrollToBottom(); // 确保容器尺寸改变时，视口强制滚动到最下方，绝不遮挡输入框
-          const dims = fitAddon.proposeDimensions();
-          if (dims) {
-            // 防御：cols 和 rows 必须大于合理值，防范容器大小过渡期瞬时极小而导致的 PTY 强制折行与严重乱码错位
-            if (dims.cols < 20 || dims.rows < 5) {
-              log(`Ignore micro resize dims: cols=${dims.cols}, rows=${dims.rows}`);
-              return;
-            }
-            invoke("resize_terminal", {
-              sessionId,
-              cols: dims.cols,
-              rows: dims.rows,
-            }).catch((err) => log(`Terminal resize sync error: ${err}`));
-          }
-        } catch (e) {
-          // 捕获未挂载时测量的尺寸异常
-        }
-      }, 120); // 120ms 防抖，过滤高频 resize 触发，让侧边栏拖拽顺畅无比且终端完全不闪烁
-    };
-
+    // 6. ResizeObserver 只产生测量意图；统一调度器负责合并高频变化和最新 active 状态判断。
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          // 只有当尺寸确实大于 0 且处于 active 状态时才执行 fit
-          handleResize();
+        if (width > 0 && height > 0 && isActiveRef.current) {
+          scheduleTerminalFit("resize-observer");
         }
       }
     });
@@ -1006,27 +1080,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       const newSize = customEvent.detail;
       log(`Received font size change event: size=${newSize}`);
       term.options.fontSize = newSize;
-      
-      if (!isActive) {
-        // 非激活状态的标签页不进行 fit 计算以防缩至 0 行，激活时自然会重新 fit 覆盖
-        return;
-      }
 
-      // 精准防抖动触发 fit，等 Canvas 重绘完成
-      setTimeout(() => {
-        try {
-          fitAddon.fit();
-          term.scrollToBottom(); // 确保字号发生热切时，视口也强制滚动到最下方
-          const dims = fitAddon.proposeDimensions();
-          if (dims) {
-            invoke("resize_terminal", {
-              sessionId,
-              cols: dims.cols,
-              rows: dims.rows,
-            }).catch((err) => log(`Font size change resize sync error: ${err}`));
-          }
-        } catch (err) {}
-      }, 50);
+      if (isActiveRef.current) {
+        scheduleTerminalFit("font-size-change", { forceScrollToBottom: true });
+      }
     };
     window.addEventListener("kkcoder-font-size-change", handleFontSizeChange);
 
@@ -1034,9 +1091,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       log("TerminalTab unmounting. Cleaning up...");
       // 先标记 listener 已取消，防范异步 listener 竞态泄漏
       listenerCancelled = true;
-      if (resizeTimeout) {
-        clearTimeout(resizeTimeout);
+      ptyReadyRef.current = false;
+      if (fitDebounceTimer !== null) {
+        window.clearTimeout(fitDebounceTimer);
       }
+      if (fitAnimationFrame !== null) {
+        window.cancelAnimationFrame(fitAnimationFrame);
+      }
+      scheduleTerminalFitRef.current = () => {};
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
@@ -1071,40 +1133,16 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, directory, agentType]);
 
-  // 当标签页激活时，自动将物理焦点 focus 绑定给当前终端，实现“一开即写、一切即敲”的高端心流
-  // 同时，触发 fitAddon.fit() 重新计算终端画布大小，并同步给 PTY 进程，彻底解决 display: none 到 flex 转换导致的界面缩水/缩成一行的问题
+  // 标签激活时只提交一次合并后的 fit 意图；实际 PTY resize 由统一去重通道处理。
   useEffect(() => {
     if (isActive && xtermRef.current) {
-      log(`Auto-focusing and fitting terminal instance for active session: ${sessionId}`);
-      // 立即执行一次 fit，防止在布局显示时出现短暂空白或闪烁
-      try {
-        if (fitAddonRef.current && xtermRef.current) {
-          fitAddonRef.current.fit();
-        }
-      } catch (e) {}
-
-      // 延迟 80ms 等 DOM 完全刷新 (display: flex 生效) 后平滑捕获系统焦点并重新测绘画布
-      const timer = setTimeout(() => {
-        try {
-          if (fitAddonRef.current && xtermRef.current) {
-            fitAddonRef.current.fit();
-            xtermRef.current.scrollToBottom();
-            const dims = fitAddonRef.current.proposeDimensions();
-            if (dims) {
-              log(`Active tab fit dimensions: cols=${dims.cols}, rows=${dims.rows}`);
-              invoke("resize_terminal", {
-                sessionId,
-                cols: dims.cols,
-                rows: dims.rows,
-              }).catch((err) => log(`Active tab resize sync error: ${err}`));
-            }
-          }
-          xtermRef.current?.focus();
-        } catch (e) {
-          console.error("Failed to focus or fit terminal", e);
-        }
-      }, 80);
-      return () => clearTimeout(timer);
+      log(`Scheduling terminal fit for active session: ${sessionId}`);
+      scheduleTerminalFitRef.current("tab-active", {
+        focus: true,
+        forceScrollToBottom: true,
+        // 标签可能刚从远程控制或隐藏状态恢复，要求后端核对一次真实尺寸。
+        forcePtySync: true,
+      });
     }
   }, [isActive, sessionId]);
 
