@@ -2983,11 +2983,14 @@ input:checked + .switch-slider:before {
   transition:
     transform 0.18s ease,
     visibility 0s linear 0.18s;
-  will-change: transform;
+  /* 注意：不要加 will-change: transform —— 它（连同非 none 的 transform）会让本元素成为
+     position:fixed 后代的包含块，导致抽屉内提交悬浮卡 / 右键菜单 / 确认弹窗按视口坐标定位时
+     被误当成相对抽屉定位而飞出屏幕。开启态改用 transform: none，动画过渡照常平滑。 */
 }
 
 .project-workspace-drawer.open {
-  transform: translateX(0);
+  /* 滑入完成后回到 none（过渡动画与 translateX(0) 等价仍平滑），避免对 fixed 后代建立包含块 */
+  transform: none;
   visibility: visible;
   pointer-events: auto;
   transition:
