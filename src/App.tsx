@@ -269,13 +269,6 @@ function App() {
     const val = localStorage.getItem("kkcoder_setting_preview_font_size");
     return val ? parseFloat(val) : 12.5;
   });
-  const [previewContextMenu, setPreviewContextMenu] = useState<{
-    x: number;
-    y: number;
-    startLine: number;
-    endLine: number;
-  } | null>(null);
-
   const startProjectTreeResize = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizingProjectTree(true);
@@ -702,156 +695,6 @@ function App() {
     setPreviewFile(null);
   }, [activeSession?.path]);
 
-  // 监听点击外部关闭预览右键菜单
-  useEffect(() => {
-    const closeMenu = () => setPreviewContextMenu(null);
-    window.addEventListener("click", closeMenu);
-    return () => window.removeEventListener("click", closeMenu);
-  }, []);
-
-  const handlePreviewContextMenu = useCallback((e: React.MouseEvent) => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || !previewFile) return;
-
-    // 检查选中的文本是否在预览面板内
-    const range = selection.getRangeAt(0);
-    const container = range.commonAncestorContainer as HTMLElement;
-    
-    let isInsidePreview = false;
-    let curr: HTMLElement | null = container;
-    while (curr && curr !== document.body) {
-      if (curr.classList && (curr.classList.contains("preview-body") || curr.classList.contains("file-preview-modal"))) {
-        isInsidePreview = true;
-        break;
-      }
-      curr = curr.parentElement;
-    }
-    
-    if (!isInsidePreview) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    let startLine = Infinity;
-    let endLine = -Infinity;
-
-    const getLineNumberFromNode = (node: Node | null): number | null => {
-      let temp: HTMLElement | null = node as HTMLElement;
-      while (temp && temp !== document.body) {
-        if (temp.classList && temp.classList.contains("preview-code-line")) {
-          const attr = temp.getAttribute("data-line");
-          return attr ? parseInt(attr, 10) : null;
-        }
-        temp = temp.parentElement;
-      }
-      return null;
-    };
-
-    const anchorLine = getLineNumberFromNode(selection.anchorNode);
-    const focusLine = getLineNumberFromNode(selection.focusNode);
-
-    if (anchorLine !== null) {
-      startLine = Math.min(startLine, anchorLine);
-      endLine = Math.max(endLine, anchorLine);
-    }
-    if (focusLine !== null) {
-      startLine = Math.min(startLine, focusLine);
-      endLine = Math.max(endLine, focusLine);
-    }
-
-    try {
-      const allLines = document.querySelectorAll(".preview-code-line");
-      allLines.forEach((lineEl) => {
-        if (selection.containsNode(lineEl, true)) {
-          const attr = lineEl.getAttribute("data-line");
-          if (attr) {
-            const l = parseInt(attr, 10);
-            startLine = Math.min(startLine, l);
-            endLine = Math.max(endLine, l);
-          }
-        }
-      });
-    } catch (err) {}
-
-    if (startLine === Infinity || endLine === -Infinity) return;
-
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + 160 > window.innerWidth) {
-      x = Math.max(0, x - 160);
-    }
-
-    setPreviewContextMenu({
-      x,
-      y,
-      startLine,
-      endLine
-    });
-  }, [previewFile]);
-
-  // 从 Selection 提取起始行号 and 结束行号的通用工具函数
-  const getSelectionLineRange = useCallback((selection: Selection) => {
-    let startLine = Infinity;
-    let endLine = -Infinity;
-
-    const getLineNumberFromNode = (node: Node | null): number | null => {
-      let temp: HTMLElement | null = node as HTMLElement;
-      while (temp && temp !== document.body) {
-        if (temp.classList && temp.classList.contains("preview-code-line")) {
-          const attr = temp.getAttribute("data-line");
-          return attr ? parseInt(attr, 10) : null;
-        }
-        temp = temp.parentElement;
-      }
-      return null;
-    };
-
-    const anchorLine = getLineNumberFromNode(selection.anchorNode);
-    const focusLine = getLineNumberFromNode(selection.focusNode);
-
-    if (anchorLine !== null) {
-      startLine = Math.min(startLine, anchorLine);
-      endLine = Math.max(endLine, anchorLine);
-    }
-    if (focusLine !== null) {
-      startLine = Math.min(startLine, focusLine);
-      endLine = Math.max(endLine, focusLine);
-    }
-
-    try {
-      const allLines = document.querySelectorAll(".preview-code-line");
-      allLines.forEach((lineEl) => {
-        if (selection.containsNode(lineEl, true)) {
-          const attr = lineEl.getAttribute("data-line");
-          if (attr) {
-            const l = parseInt(attr, 10);
-            startLine = Math.min(startLine, l);
-            endLine = Math.max(endLine, l);
-          }
-        }
-      });
-    } catch (err) {}
-
-    if (startLine === Infinity || endLine === -Infinity) return null;
-    return { startLine, endLine };
-  }, []);
-
-  // 将框选的部分代码添加到对话（末尾带空格，且自动聚焦终端）
-  const handleAddToConversationFromSelection = useCallback((selection: Selection) => {
-    if (!previewFile || !activeSessionId) return;
-    const range = getSelectionLineRange(selection);
-    if (!range) return;
-
-    const { startLine, endLine } = range;
-    const isSingleLine = startLine === endLine;
-    const rangeStr = isSingleLine ? `L${startLine}` : `L${startLine}-L${endLine}`;
-    
-    // 路径用双引号（绝对路径，与文件树/diff 入口一致），且行号后面要自带一个空格
-    const data = `"${toAbsolutePath(previewFile.path)}":${rangeStr} `;
-
-    insertConversationTagToActiveTerminal(data);
-  }, [previewFile, activeSessionId, getSelectionLineRange, insertConversationTagToActiveTerminal, toAbsolutePath]);
-
   // Monaco 编辑器：脏态 + 保存句柄
   const fileEditorRef = useRef<FileEditorHandle>(null);
   const [fileDirty, setFileDirty] = useState(false);
@@ -906,19 +749,18 @@ function App() {
           }
         }
 
-        // Ctrl + U 选中内容添加到对话
+        // 保留旧预览区 Ctrl+U 的按键拦截；Monaco 内的添加操作由编辑器 action 接管。
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u") {
           const selection = window.getSelection();
           if (selection && !selection.isCollapsed) {
             e.preventDefault();
-            handleAddToConversationFromSelection(selection);
           }
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [previewFile, closePreview, handleAddToConversationFromSelection]);
+  }, [previewFile, closePreview]);
 
   const handleFileClick = useCallback(async (relativePath: string) => {
     if (!activeSession?.path) return;
@@ -2402,7 +2244,6 @@ function App() {
                 <div
                   className="file-preview-modal"
                   onClick={(e) => e.stopPropagation()}
-                  onContextMenu={handlePreviewContextMenu}
                 >
                 <div className="preview-header">
                   <div className="preview-title-area">
@@ -2772,35 +2613,6 @@ function App() {
           </>
         )}
 
-        {previewContextMenu && previewFile && (
-          <div 
-            className="tree-context-menu"
-            style={{
-              position: "fixed",
-              left: `${previewContextMenu.x}px`,
-              top: `${previewContextMenu.y}px`,
-              zIndex: 9999,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => {
-                const isSingleLine = previewContextMenu.startLine === previewContextMenu.endLine;
-                const rangeStr = isSingleLine
-                  ? `L${previewContextMenu.startLine}`
-                  : `L${previewContextMenu.startLine}-L${previewContextMenu.endLine}`;
-                const absolutePath = toAbsolutePath(previewFile.path);
-                const data = `"${absolutePath}":${rangeStr} `;
-
-                insertConversationTagToActiveTerminal(data);
-
-                setPreviewContextMenu(null);
-              }}
-            >
-              添加到对话
-            </button>
-          </div>
-        )}
       </div>
 
       {/* 标签页 Tooltip */}
