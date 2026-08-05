@@ -5781,6 +5781,10 @@ input:checked + .switch-slider:before {
   position: fixed;
   z-index: 9999;
   min-width: 200px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--bg-sidebar, #1e1e2e);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -5803,6 +5807,7 @@ input:checked + .switch-slider:before {
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .branch-menu-item:hover {

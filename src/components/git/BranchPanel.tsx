@@ -7,7 +7,7 @@
  *   4. 双击分支：切换到该分支（远程分支自动 --track 创建本地分支）
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -242,6 +242,8 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath, onAddLine
 
   // ── 分支右键菜单 + 操作弹窗 ──
   const [branchMenu, setBranchMenu] = useState<{ x: number; y: number; branch: GitBranchItem } | null>(null);
+  const branchMenuRef = useRef<HTMLDivElement>(null);
+  const [branchMenuPosition, setBranchMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [branchInput, setBranchInput] = useState<{ mode: "create" | "rename"; branch: GitBranchItem; value: string } | null>(null);
   const [branchConfirm, setBranchConfirm] = useState<{ mode: "delete" | "merge"; branch: GitBranchItem; needForce: boolean } | null>(null);
   const [branchOpBusy, setBranchOpBusy] = useState(false);
@@ -512,8 +514,37 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath, onAddLine
   const openBranchMenu = (e: React.MouseEvent, branch: GitBranchItem) => {
     e.preventDefault();
     e.stopPropagation();
+    setBranchMenuPosition(null);
     setBranchMenu({ x: e.clientX, y: e.clientY, branch });
   };
+
+  // 菜单内容随分支类型和名称变化，必须按实际尺寸做视口碰撞检测。
+  useLayoutEffect(() => {
+    if (!branchMenu) {
+      setBranchMenuPosition(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const menu = branchMenuRef.current;
+      if (!menu) return;
+
+      const viewportPadding = 8;
+      const rect = menu.getBoundingClientRect();
+      const maxLeft = Math.max(viewportPadding, window.innerWidth - rect.width - viewportPadding);
+      const maxTop = Math.max(viewportPadding, window.innerHeight - rect.height - viewportPadding);
+      const left = Math.min(Math.max(branchMenu.x, viewportPadding), maxLeft);
+      const top = Math.min(Math.max(branchMenu.y, viewportPadding), maxTop);
+
+      setBranchMenuPosition((current) =>
+        current?.left === left && current.top === top ? current : { left, top }
+      );
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    return () => window.removeEventListener("resize", updatePosition);
+  }, [branchMenu]);
 
   // git 错误本地化（分支操作通用）
   const localizeGitError = (msg: string): string => {
@@ -1202,10 +1233,6 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath, onAddLine
         const b = branchMenu.branch;
         const isCurrent = b.isCurrent;
         const isRemote = b.isRemote;
-        const menuW = 224;
-        const menuH = 300;
-        const left = Math.min(branchMenu.x, window.innerWidth - menuW - 8);
-        const top = Math.min(branchMenu.y, window.innerHeight - menuH - 8);
         return (
           <>
             <div
@@ -1213,7 +1240,15 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath, onAddLine
               onClick={() => setBranchMenu(null)}
               onContextMenu={(e) => { e.preventDefault(); setBranchMenu(null); }}
             />
-            <div className="branch-context-menu" style={{ left, top }}>
+            <div
+              ref={branchMenuRef}
+              className="branch-context-menu"
+              style={{
+                left: branchMenuPosition?.left ?? branchMenu.x,
+                top: branchMenuPosition?.top ?? branchMenu.y,
+                visibility: branchMenuPosition ? "visible" : "hidden",
+              }}
+            >
               {!isCurrent && (
                 <button className="branch-menu-item" onClick={() => { setBranchMenu(null); handleCheckout(b); }}>
                   <ArrowRightLeft size={13} />
