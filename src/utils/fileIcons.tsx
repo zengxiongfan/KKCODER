@@ -2,7 +2,7 @@
  * 文件图标映射 —— 基于 CLI-Manager 同款的 @baybreezy/file-extension-icon（Material 图标主题）。
  *
  * 该库返回 base64 data URI，通过 <img> 渲染。图标为固定多色（Material 设计规范），
- * 不随 KKCODER 主题换色 —— 这是该库的已知限制（见 README / 方案对比文档）。
+ * 不随 AgentDesk 主题换色 —— 这是该库的已知限制（见 README / 方案对比文档）。
  *
  * 用法：
  *   import { FileIcon } from "@/utils/fileIcons";

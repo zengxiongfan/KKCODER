@@ -53,10 +53,10 @@ export const DiffViewerModal: FC<DiffViewerModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [viewType, setViewType] = useState<"split" | "unified">(() =>
-    localStorage.getItem("kkcoder_diff_view") === "unified" ? "unified" : "split"
+    localStorage.getItem("agentdesk_diff_view") === "unified" ? "unified" : "split"
   );
   const [collapseUnchanged, setCollapseUnchanged] = useState<boolean>(
-    () => localStorage.getItem("kkcoder_diff_collapse") !== "off"
+    () => localStorage.getItem("agentdesk_diff_collapse") !== "off"
   );
 
   const [themeName] = useState(() => getMonacoTheme());
@@ -183,9 +183,9 @@ export const DiffViewerModal: FC<DiffViewerModalProps> = ({
     // 故用后缀匹配；包裹 _getMenuActions 过滤（防御式，失败则不过滤）。
     const setupContextMenu = (ed: editor.IStandaloneCodeEditor) => {
       ed.addAction({
-        id: "kkcoder.addToConversation",
+        id: "agentdesk.addToConversation",
         label: "添加到对话",
-        contextMenuGroupId: "1_kkcoder",
+        contextMenuGroupId: "1_agentdesk",
         contextMenuOrder: 1,
         run: (e) => {
           const sel = e.getSelection();
@@ -200,7 +200,7 @@ export const DiffViewerModal: FC<DiffViewerModalProps> = ({
       try {
         const isAllowed = (id?: string) =>
           !!id &&
-          ["kkcoder.addToConversation"].some((k) => id === k || id.endsWith(":" + k));
+          ["agentdesk.addToConversation"].some((k) => id === k || id.endsWith(":" + k));
         const contextmenu = ed.getContribution("editor.contrib.contextmenu") as unknown as {
           _getMenuActions?: (...args: unknown[]) => Array<{ id?: string }>;
         } | null;
@@ -259,13 +259,13 @@ export const DiffViewerModal: FC<DiffViewerModalProps> = ({
 
   const switchView = (v: "split" | "unified") => {
     setViewType(v);
-    localStorage.setItem("kkcoder_diff_view", v);
+    localStorage.setItem("agentdesk_diff_view", v);
   };
 
   const toggleCollapse = () => {
     setCollapseUnchanged((prev) => {
       const next = !prev;
-      localStorage.setItem("kkcoder_diff_collapse", next ? "on" : "off");
+      localStorage.setItem("agentdesk_diff_collapse", next ? "on" : "off");
       return next;
     });
   };

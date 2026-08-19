@@ -46,12 +46,12 @@ function log(msg: string) {
   const fullMsg = `[JS][${time}] ${msg}`;
   console.log(fullMsg);
   try {
-    const existingLogs = JSON.parse(localStorage.getItem("kkcoder_logs") || "[]");
+    const existingLogs = JSON.parse(localStorage.getItem("agentdesk_logs") || "[]");
     existingLogs.push(fullMsg);
     if (existingLogs.length > 200) {
       existingLogs.shift();
     }
-    localStorage.setItem("kkcoder_logs", JSON.stringify(existingLogs));
+    localStorage.setItem("agentdesk_logs", JSON.stringify(existingLogs));
   } catch (e) {}
 }
 
@@ -63,8 +63,8 @@ function getFolderName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-const CLAUDE_VERSION_CACHE_KEY = "kkcoder_cached_claude_version";
-const CODEX_VERSION_CACHE_KEY = "kkcoder_cached_codex_version";
+const CLAUDE_VERSION_CACHE_KEY = "agentdesk_cached_claude_version";
+const CODEX_VERSION_CACHE_KEY = "agentdesk_cached_codex_version";
 
 // 将 codex 版本字符串统一规范化为 "Codex <version>"，处理 "0.1.0"、"codex 0.1.0"、"codex-cli 0.144.1" 等
 function normalizeCodexVersion(ver: string): string {
@@ -116,7 +116,7 @@ function App() {
   };
 
   const handleLaunchCcswitch = () => {
-    const path = localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+    const path = localStorage.getItem("agentdesk_setting_ccswitch_path") || "";
     if (!path.trim()) {
       alert("请先在「设置」->「终端设置」中配置 ccswitch.exe 的路径。");
       return;
@@ -179,7 +179,7 @@ function App() {
   // 颜色调色盘主题切换相关状态
   const [showThemeDropdown, setShowThemeDropdown] = useState<boolean>(false);
   const [currentTheme, setCurrentTheme] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_theme") || "light-premium";
+    return localStorage.getItem("agentdesk_setting_theme") || "light-premium";
   });
   const [isInitLoaded, setIsInitLoaded] = useState<boolean>(false);
 
@@ -194,7 +194,7 @@ function App() {
 
   // 侧边栏拖拽调宽状态与拖拽处理
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
-    const saved = localStorage.getItem("kkcoder_sidebar_width");
+    const saved = localStorage.getItem("agentdesk_sidebar_width");
     return saved ? parseInt(saved, 10) : 300;
   });
   const [isResizing, setIsResizing] = useState<boolean>(false);
@@ -214,7 +214,7 @@ function App() {
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = Math.max(200, Math.min(450, e.clientX));
       setSidebarWidth(newWidth);
-      localStorage.setItem("kkcoder_sidebar_width", newWidth.toString());
+      localStorage.setItem("agentdesk_sidebar_width", newWidth.toString());
       window.dispatchEvent(new Event("resize"));
     };
 
@@ -240,7 +240,7 @@ function App() {
 
   // 右侧项目树拖拽调宽状态与拖拽处理
   const [projectTreeWidth, setProjectTreeWidth] = useState<number>(() => {
-    const saved = localStorage.getItem("kkcoder_project_tree_width");
+    const saved = localStorage.getItem("agentdesk_project_tree_width");
     return saved ? parseInt(saved, 10) : 260;
   });
   const [isResizingProjectTree, setIsResizingProjectTree] = useState<boolean>(false);
@@ -259,13 +259,13 @@ function App() {
     } else {
       // 抽屉关闭不会改变终端尺寸，只恢复当前终端输入焦点。
       window.requestAnimationFrame(() => {
-        window.dispatchEvent(new Event("kkcoder-focus-active-terminal"));
+        window.dispatchEvent(new Event("agentdesk-focus-active-terminal"));
       });
     }
   }, []);
   // 右侧面板 Tab 切换：'files' = 项目文件树, 'git' = Git 变更面板, 'branches' = Git 分支面板
   const [rightPanelTab, setRightPanelTab] = useState<"files" | "git" | "branches">(() => {
-    const saved = localStorage.getItem("kkcoder_right_panel_tab");
+    const saved = localStorage.getItem("agentdesk_right_panel_tab");
     if (saved === "git" || saved === "branches") return saved;
     return "files";
   });
@@ -278,10 +278,10 @@ function App() {
   } | null>(null);
   const [mdMode, setMdMode] = useState<"preview" | "source">("source");
   const [previewFontFamily, setPreviewFontFamily] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_preview_font_family") || "monospace";
+    return localStorage.getItem("agentdesk_setting_preview_font_family") || "monospace";
   });
   const [previewFontSize, setPreviewFontSize] = useState<number>(() => {
-    const val = localStorage.getItem("kkcoder_setting_preview_font_size");
+    const val = localStorage.getItem("agentdesk_setting_preview_font_size");
     return val ? parseFloat(val) : 12.5;
   });
   const startProjectTreeResize = (e: React.MouseEvent) => {
@@ -298,7 +298,7 @@ function App() {
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = Math.max(200, Math.min(500, window.innerWidth - e.clientX));
       setProjectTreeWidth(newWidth);
-      localStorage.setItem("kkcoder_project_tree_width", newWidth.toString());
+      localStorage.setItem("agentdesk_project_tree_width", newWidth.toString());
     };
 
     const handleMouseUp = () => {
@@ -351,23 +351,23 @@ function App() {
       setPreviewFontSize(customEvent.detail || 12.5);
     };
 
-    window.addEventListener("kkcoder-preview-font-change", handleFontChange);
-    window.addEventListener("kkcoder-preview-font-size-change", handleFontSizeChange);
+    window.addEventListener("agentdesk-preview-font-change", handleFontChange);
+    window.addEventListener("agentdesk-preview-font-size-change", handleFontSizeChange);
 
     return () => {
-      window.removeEventListener("kkcoder-preview-font-change", handleFontChange);
-      window.removeEventListener("kkcoder-preview-font-size-change", handleFontSizeChange);
+      window.removeEventListener("agentdesk-preview-font-change", handleFontChange);
+      window.removeEventListener("agentdesk-preview-font-size-change", handleFontSizeChange);
     };
   }, []);
 
   // 快捷短语状态
   const [shortcutsEnabled, setShortcutsEnabled] = useState<boolean>(() => {
-    const val = localStorage.getItem("kkcoder_shortcuts_enabled");
+    const val = localStorage.getItem("agentdesk_shortcuts_enabled");
     return val === null ? false : val === "true";
   });
 
   const [shortcutsList, setShortcutsList] = useState<{ title: string; content: string }[]>(() => {
-    const val = localStorage.getItem("kkcoder_shortcuts_list");
+    const val = localStorage.getItem("agentdesk_shortcuts_list");
     if (val) {
       try {
         const parsed = JSON.parse(val);
@@ -390,10 +390,10 @@ function App() {
   // 监听快捷短语设置变动
   useEffect(() => {
     const handleShortcutsChange = () => {
-      const enabledVal = localStorage.getItem("kkcoder_shortcuts_enabled");
+      const enabledVal = localStorage.getItem("agentdesk_shortcuts_enabled");
       setShortcutsEnabled(enabledVal === null ? false : enabledVal === "true");
 
-      const listVal = localStorage.getItem("kkcoder_shortcuts_list");
+      const listVal = localStorage.getItem("agentdesk_shortcuts_list");
       if (listVal) {
         try {
           const parsed = JSON.parse(listVal);
@@ -408,9 +408,9 @@ function App() {
       }
     };
 
-    window.addEventListener("kkcoder-shortcuts-change", handleShortcutsChange);
+    window.addEventListener("agentdesk-shortcuts-change", handleShortcutsChange);
     return () => {
-      window.removeEventListener("kkcoder-shortcuts-change", handleShortcutsChange);
+      window.removeEventListener("agentdesk-shortcuts-change", handleShortcutsChange);
     };
   }, []);
 
@@ -517,7 +517,7 @@ function App() {
   const [sessionBusy, setSessionBusy] = useState<Record<string, boolean>>({});
 
   const handleUserSubmittedInput = (sessionId: string, submittedAt: string = new Date().toISOString()) => {
-    localStorage.setItem(`kkcoder_session_has_dialogue_${sessionId}`, "true");
+    localStorage.setItem(`agentdesk_session_has_dialogue_${sessionId}`, "true");
     setSessions((prev) => updateSessionLastUserMessageAt(prev, sessionId, submittedAt));
 
     const targetSession = sessions.find((session) => session.id === sessionId);
@@ -532,26 +532,26 @@ function App() {
 
   // 统一的自动修正触发函数（根据命名模式选择 heuristic 或 LLM）
   const initialRenameTimes = (() => {
-    try { return JSON.parse(localStorage.getItem("kkcoder_last_rename_times") || "{}") as Record<string, number>; }
+    try { return JSON.parse(localStorage.getItem("agentdesk_last_rename_times") || "{}") as Record<string, number>; }
     catch { return {} as Record<string, number>; }
   })();
   const lastRenameTimesRef = useRef<Record<string, number>>(initialRenameTimes);
   const triggerAutoRename = (source: string) => {
-    const mode = localStorage.getItem("kkcoder_setting_namer_mode") || "heuristic";
-    const skipFav = localStorage.getItem("kkcoder_setting_auto_rename_skip_favorites") !== "false";
+    const mode = localStorage.getItem("agentdesk_setting_namer_mode") || "heuristic";
+    const skipFav = localStorage.getItem("agentdesk_setting_auto_rename_skip_favorites") !== "false";
 
     const cmd = mode === "llm" ? "llm_rename_sessions" : "auto_rename_sessions";
     const params: Record<string, unknown> = { skipFavorites: skipFav, projectFilter: null };
 
     if (mode === "llm") {
-      const apiKey = localStorage.getItem("kkcoder_setting_llm_api_key") || "";
+      const apiKey = localStorage.getItem("agentdesk_setting_llm_api_key") || "";
       if (!apiKey) {
         log(`${source} auto-rename: LLM mode enabled but API key is empty, skipping.`);
         return;
       }
-      params.apiUrl = localStorage.getItem("kkcoder_setting_llm_api_url") || "https://api.deepseek.com";
+      params.apiUrl = localStorage.getItem("agentdesk_setting_llm_api_url") || "https://api.deepseek.com";
       params.apiKey = apiKey;
-      params.model = localStorage.getItem("kkcoder_setting_llm_model") || "deepseek-v4-flash";
+      params.model = localStorage.getItem("agentdesk_setting_llm_model") || "deepseek-v4-flash";
       // 传入上次修正时间表，Rust 端只处理有新内容的会话
       params.lastRenameTimes = JSON.stringify(lastRenameTimesRef.current);
     }
@@ -566,7 +566,7 @@ function App() {
           for (const r of changed) {
             lastRenameTimesRef.current[r.session_id] = now;
           }
-          try { localStorage.setItem("kkcoder_last_rename_times", JSON.stringify(lastRenameTimesRef.current)); } catch {}
+          try { localStorage.setItem("agentdesk_last_rename_times", JSON.stringify(lastRenameTimesRef.current)); } catch {}
           invoke<Session[]>("get_sessions").then((updated) => {
             if (updated) setSessions(updated);
           }).catch(() => {});
@@ -579,12 +579,12 @@ function App() {
   const renamedSinceLastInputRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const interval = window.setInterval(() => {
-      if (localStorage.getItem("kkcoder_setting_auto_rename_idle") !== "true") return;
+      if (localStorage.getItem("agentdesk_setting_auto_rename_idle") !== "true") return;
 
       const now = Date.now();
-      const idleMinutes = parseInt(localStorage.getItem("kkcoder_setting_idle_minutes") || "5", 10);
+      const idleMinutes = parseInt(localStorage.getItem("agentdesk_setting_idle_minutes") || "5", 10);
       const IDLE_MS = idleMinutes * 60 * 1000;
-      const skipFav = localStorage.getItem("kkcoder_setting_auto_rename_skip_favorites") !== "false";
+      const skipFav = localStorage.getItem("agentdesk_setting_auto_rename_skip_favorites") !== "false";
 
       // 找出空闲 >= 5 分钟且未被修正过的会话
       let hasIdle = false;
@@ -688,7 +688,7 @@ function App() {
 
       setProjectTreeWidth(prev => {
         if (idealW > prev) {
-          localStorage.setItem("kkcoder_project_tree_width", idealW.toString());
+          localStorage.setItem("agentdesk_project_tree_width", idealW.toString());
           return idealW;
         }
         return prev;
@@ -708,7 +708,7 @@ function App() {
 
   const insertConversationTagToActiveTerminal = useCallback((text: string) => {
     if (!activeSessionId || !text) return;
-    window.dispatchEvent(new CustomEvent("kkcoder-insert-conversation-tag", {
+    window.dispatchEvent(new CustomEvent("agentdesk-insert-conversation-tag", {
       detail: {
         sessionId: activeSessionId,
         text,
@@ -719,7 +719,7 @@ function App() {
   // 文件拖拽到指定会话：将路径插入到目标会话的终端
   const handleInsertPathToSession = useCallback((sessionId: string, text: string) => {
     if (!sessionId || !text) return;
-    window.dispatchEvent(new CustomEvent("kkcoder-insert-conversation-tag", {
+    window.dispatchEvent(new CustomEvent("agentdesk-insert-conversation-tag", {
       detail: { sessionId, text },
     }));
   }, []);
@@ -852,13 +852,13 @@ function App() {
   // 记住最后的会话和打开的 Tab 标签页
   useEffect(() => {
     if (isInitLoaded) {
-      localStorage.setItem("kkcoder_last_active_session_id", activeSessionId);
+      localStorage.setItem("agentdesk_last_active_session_id", activeSessionId);
     }
   }, [activeSessionId, isInitLoaded]);
 
   useEffect(() => {
     if (isInitLoaded) {
-      localStorage.setItem("kkcoder_last_open_tab_ids", JSON.stringify(openTabIds));
+      localStorage.setItem("agentdesk_last_open_tab_ids", JSON.stringify(openTabIds));
     }
   }, [openTabIds, isInitLoaded]);
 
@@ -946,8 +946,8 @@ function App() {
 
   // 💾 自动载入与保存持久化窗口窗体大小 (防抖 300ms 性能极致优化)
   useEffect(() => {
-    const savedWidth = localStorage.getItem("kkcoder_window_width");
-    const savedHeight = localStorage.getItem("kkcoder_window_height");
+    const savedWidth = localStorage.getItem("agentdesk_window_width");
+    const savedHeight = localStorage.getItem("agentdesk_window_height");
     const w = savedWidth ? parseInt(savedWidth, 10) : 1200;
     const h = savedHeight ? parseInt(savedHeight, 10) : 800;
     const clampedW = Math.max(1000, w);
@@ -968,8 +968,8 @@ function App() {
         const w = window.outerWidth;
         const h = window.outerHeight;
         if (w >= 1000 && h >= 750) {
-          localStorage.setItem("kkcoder_window_width", String(w));
-          localStorage.setItem("kkcoder_window_height", String(h));
+          localStorage.setItem("agentdesk_window_width", String(w));
+          localStorage.setItem("agentdesk_window_height", String(h));
         }
       }, 300);
     };
@@ -1028,7 +1028,7 @@ function App() {
       try {
         unlisten = await appWindow.onCloseRequested(async (event) => {
           event.preventDefault();
-          const behavior = localStorage.getItem("kkcoder_setting_close_behavior") || "exit";
+          const behavior = localStorage.getItem("agentdesk_setting_close_behavior") || "exit";
           log(`onCloseRequested event captured. Current behavior: ${behavior}`);
           
           if (behavior === "exit") {
@@ -1061,7 +1061,7 @@ function App() {
     const scheduleDeferredDiagnostics = () => {
       diagnosticsTimer = window.setTimeout(() => {
         try {
-          const persistedLogs = JSON.parse(localStorage.getItem("kkcoder_logs") || "[]");
+          const persistedLogs = JSON.parse(localStorage.getItem("agentdesk_logs") || "[]");
           if (persistedLogs.length > 0) {
             console.group("=== KkCoder 历史崩溃/运行追踪日志 ===");
             persistedLogs.forEach((l: string) => console.log(l));
@@ -1124,8 +1124,8 @@ function App() {
         log(`Successfully fetched ${data ? data.length : 0} sessions from database.`);
         setSessions(data || []);
         if (data && data.length > 0) {
-          const lastActiveId = localStorage.getItem("kkcoder_last_active_session_id");
-          const lastOpenTabsStr = localStorage.getItem("kkcoder_last_open_tab_ids");
+          const lastActiveId = localStorage.getItem("agentdesk_last_active_session_id");
+          const lastOpenTabsStr = localStorage.getItem("agentdesk_last_open_tab_ids");
           let lastOpenTabs: string[] = [];
           try {
             if (lastOpenTabsStr) lastOpenTabs = JSON.parse(lastOpenTabsStr);
@@ -1149,7 +1149,7 @@ function App() {
         scheduleDeferredDiagnostics();
 
         // 启动时自动修正会话名称（延迟执行，不阻塞 UI 加载）
-        if (localStorage.getItem("kkcoder_setting_auto_rename_startup") === "true") {
+        if (localStorage.getItem("agentdesk_setting_auto_rename_startup") === "true") {
           window.setTimeout(() => {
             triggerAutoRename("Startup");
           }, 3000);
@@ -1486,8 +1486,8 @@ function App() {
       const customEvent = e as CustomEvent<string>;
       setCurrentTheme(customEvent.detail);
     };
-    window.addEventListener("kkcoder-theme-change", handleThemeEvent);
-    return () => window.removeEventListener("kkcoder-theme-change", handleThemeEvent);
+    window.addEventListener("agentdesk-theme-change", handleThemeEvent);
+    return () => window.removeEventListener("agentdesk-theme-change", handleThemeEvent);
   }, []);
 
   const applyTheme = (themeName: string) => {
@@ -1605,9 +1605,9 @@ function App() {
 
   const handleSelectTheme = (newTheme: string) => {
     setCurrentTheme(newTheme);
-    localStorage.setItem("kkcoder_setting_theme", newTheme);
+    localStorage.setItem("agentdesk_setting_theme", newTheme);
     applyTheme(newTheme);
-    window.dispatchEvent(new CustomEvent("kkcoder-theme-change", { detail: newTheme }));
+    window.dispatchEvent(new CustomEvent("agentdesk-theme-change", { detail: newTheme }));
   };
 
   // 💾 保存标签页的行内重命名并同步数据库
@@ -1698,7 +1698,7 @@ function App() {
     try {
       await invoke("delete_session_permanently", { id });
       setSessions((prev) => prev.filter((s) => s.id !== id));
-      localStorage.removeItem(`kkcoder_session_has_dialogue_${id}`);
+      localStorage.removeItem(`agentdesk_session_has_dialogue_${id}`);
     } catch (err) {
       alert(`彻底删除会话失败: ${err}`);
     }
@@ -1709,7 +1709,7 @@ function App() {
     try {
       sessions.forEach((s) => {
         if (s.deleted === 1) {
-          localStorage.removeItem(`kkcoder_session_has_dialogue_${s.id}`);
+          localStorage.removeItem(`agentdesk_session_has_dialogue_${s.id}`);
         }
       });
       await invoke("empty_trash");
@@ -1724,7 +1724,7 @@ function App() {
     log(`handleDeleteSessionsBatch triggered: ids=[${ids.join(", ")}]`);
     try {
       await Promise.all(ids.map((id) => invoke("delete_session", { id })));
-      ids.forEach((id) => localStorage.removeItem(`kkcoder_session_has_dialogue_${id}`));
+      ids.forEach((id) => localStorage.removeItem(`agentdesk_session_has_dialogue_${id}`));
       setSessions((prev) => prev.filter((s) => !ids.includes(s.id)));
       setOpenTabIds((prev) => prev.filter((tid) => !ids.includes(tid)));
       if (ids.includes(activeSessionId)) {
@@ -1863,7 +1863,7 @@ function App() {
           <div className="titlebar-logo-icon">
             KK
           </div>
-          <span className="logo-title-text">KKCoder 极简 AI 终端管理器</span>
+          <span className="logo-title-text">AgentDesk 极简 AI 终端管理器</span>
         </div>
 
         <div className="titlebar-actions" onMouseDown={(e) => e.stopPropagation()}>
@@ -2209,7 +2209,7 @@ function App() {
               {openTabIds.length === 0 ? (
                 <div className="empty-state">
                   <span className="empty-state-icon">🖥️</span>
-                  <div className="empty-state-title">KKCoder AI 终端管理器</div>
+                  <div className="empty-state-title">AgentDesk AI 终端管理器</div>
                   <div className="empty-state-desc">
                     当前没有处于活动状态的会话标签。
                     请选择左上角的 Agent 类型并点击“**新建会话**”按钮来开启一个托管终端。
@@ -2527,7 +2527,7 @@ function App() {
                 // 3. 等 xterm 渲染完成后再派发定位事件（延时两拍：DOM 更新 + fit）
                 setTimeout(() => {
                   window.dispatchEvent(
-                    new CustomEvent("kkcoder-scroll-to-anchor", {
+                    new CustomEvent("agentdesk-scroll-to-anchor", {
                       detail: { sessionId: historySessionId, anchor },
                     })
                   );
@@ -2561,7 +2561,7 @@ function App() {
                     title="文件"
                     onClick={() => {
                       setRightPanelTab("files");
-                      localStorage.setItem("kkcoder_right_panel_tab", "files");
+                      localStorage.setItem("agentdesk_right_panel_tab", "files");
                     }}
                   >
                     <Folder size={12} />
@@ -2572,7 +2572,7 @@ function App() {
                     title="提交"
                     onClick={() => {
                       setRightPanelTab("git");
-                      localStorage.setItem("kkcoder_right_panel_tab", "git");
+                      localStorage.setItem("agentdesk_right_panel_tab", "git");
                     }}
                   >
                     <GitCommit size={12} />
@@ -2583,7 +2583,7 @@ function App() {
                     title="分支"
                     onClick={() => {
                       setRightPanelTab("branches");
-                      localStorage.setItem("kkcoder_right_panel_tab", "branches");
+                      localStorage.setItem("agentdesk_right_panel_tab", "branches");
                     }}
                   >
                     <GitBranch size={12} />
@@ -2868,7 +2868,7 @@ function App() {
         <div className="modal-overlay show" style={{ zIndex: 1100 }}>
           <div className="modal-card select-confirm-modal" style={{ width: "420px" }}>
             <div className="modal-header">
-              <span className="modal-title" style={{ fontSize: "15px", fontWeight: 700 }}>退出 KKCoder</span>
+              <span className="modal-title" style={{ fontSize: "15px", fontWeight: 700 }}>退出 AgentDesk</span>
               <button className="modal-close" onClick={() => setShowCloseConfirmModal(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "10px 0" }}>
@@ -2899,7 +2899,7 @@ function App() {
                 style={{ backgroundColor: "var(--color-primary)", color: "#ffffff" }}
                 onClick={() => {
                   if (rememberCloseChoice) {
-                    localStorage.setItem("kkcoder_setting_close_behavior", "minimize");
+                    localStorage.setItem("agentdesk_setting_close_behavior", "minimize");
                   }
                   setShowCloseConfirmModal(false);
                   appWindow.hide().catch((err) => log(`Failed to hide window: ${err}`));
@@ -2912,7 +2912,7 @@ function App() {
                 style={{ backgroundColor: "#ef4444", color: "#ffffff" }}
                 onClick={() => {
                   if (rememberCloseChoice) {
-                    localStorage.setItem("kkcoder_setting_close_behavior", "exit");
+                    localStorage.setItem("agentdesk_setting_close_behavior", "exit");
                   }
                   setShowCloseConfirmModal(false);
                   appWindow.destroy().catch((err) => log(`Failed to destroy window: ${err}`));

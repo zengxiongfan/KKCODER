@@ -4,7 +4,7 @@
  * - 语法高亮 / 行号 / 原生查找(Ctrl+F)/跳行(Ctrl+G)
  * - 脏改跟踪 + Ctrl+S 存盘（write_project_file_content）
  * - 只读门控（二进制/超大/历史·远程时 readOnly）
- * - 保留 KKCoder 特色：右键「添加到对话」动作（读选区行号 → 注入终端）
+ * - 保留 AgentDesk 特色：右键「添加到对话」动作（读选区行号 → 注入终端）
  * - 底部状态栏：语言 / 行列 / 编码 / 只读标记
  */
 
@@ -136,9 +136,9 @@ export const FileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function
     // ── 自建中文右键菜单项：只保留「添加到对话」 ──
     // 添加到对话（无选中时回退到当前光标行）
     editor.addAction({
-      id: "kkcoder.addToConversation",
+      id: "agentdesk.addToConversation",
       label: "添加到对话",
-      contextMenuGroupId: "1_kkcoder",
+      contextMenuGroupId: "1_agentdesk",
       contextMenuOrder: 1,
       run: (ed) => {
         const sel = ed.getSelection();
@@ -158,7 +158,7 @@ export const FileEditor = forwardRef<FileEditorHandle, FileEditorProps>(function
     try {
       const isAllowed = (id?: string) =>
         !!id &&
-        ["kkcoder.addToConversation"].some((k) => id === k || id.endsWith(":" + k));
+        ["agentdesk.addToConversation"].some((k) => id === k || id.endsWith(":" + k));
       const contextmenu = editor.getContribution("editor.contrib.contextmenu") as unknown as {
         _getMenuActions?: (...args: unknown[]) => Array<{ id?: string }>;
       } | null;

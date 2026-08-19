@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "KKCoder",
+  "productName": "AgentDesk",
   "version": "0.1.0",
-  "identifier": "com.kkcoder.app",
+  "identifier": "com.agentdesk.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:16888",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "KKCoder 极简 AI 终端管理器",
+        "title": "AgentDesk AI 终端管理器",
         "width": 1200,
         "height": 800,
         "minWidth": 1000,

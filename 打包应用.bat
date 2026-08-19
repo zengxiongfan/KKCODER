@@ -1,8 +1,8 @@
 @echo off
 chcp 65001 >nul 2>&1
-title KKCoder Build Tool
+title AgentDesk Build Tool
 echo ========================================
-echo   KKCoder Build Tool
+echo   AgentDesk Build Tool
 echo ========================================
 echo.
 
@@ -46,7 +46,7 @@ echo.
 echo Output:
 echo   NSIS: src-tauri\target\release\bundle\nsis\
 echo   MSI:  src-tauri\target\release\bundle\msi\
-echo   EXE:  src-tauri\target\release\tauri-app.exe
+echo   EXE:  src-tauri\target\release\agentdesk.exe
 echo.
 
 explorer src-tauri\target\release\bundle\nsis

@@ -1,4 +1,4 @@
-// KKCoder Tauri 后端核心代码 - SQLite 数据库持久化及 PTY 虚拟终端控制
+// AgentDesk Tauri 后端核心代码 - SQLite 数据库持久化及 PTY 虚拟终端控制
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use tauri::{State, AppHandle, Emitter};
@@ -11,7 +11,7 @@ mod remote;
 mod commands;
 mod git_watcher;
 
-// 极其可靠的本地调试文件日志输出器，自动写入 kkcoder_debug.log 以便于闪退后追溯
+// 极其可靠的本地调试文件日志输出器，自动写入 agentdesk_debug.log 以便于闪退后追溯
 fn log_to_file(message: &str) {
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -19,7 +19,7 @@ fn log_to_file(message: &str) {
         .create(true)
         .write(true)
         .append(true)
-        .open("kkcoder_debug.log")
+        .open("agentdesk_debug.log")
     {
         let now = std::time::SystemTime::now();
         let since_the_epoch = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
@@ -98,17 +98,17 @@ struct PtyOutputPayload {
     seq: u64,
 }
 
-// 获取本地 SQLite 数据库路径 (工作区 kkcoder.db)
+// 获取本地 SQLite 数据库路径 (工作区 agentdesk.db)
 fn get_db_path() -> std::path::PathBuf {
     let mut path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    path.push("kkcoder.db");
+    path.push("agentdesk.db");
     path
 }
 
 // 获取特定会话的缓存备份目录 (放置于系统临时目录，避免触发 Tauri 开发模式下的热重载)
 fn get_shadows_dir(session_id: &str) -> std::path::PathBuf {
     let mut path = std::env::temp_dir();
-    path.push("kkcoder_shadows");
+    path.push("agentdesk_shadows");
     path.push(session_id);
     path
 }
@@ -1092,7 +1092,7 @@ fn spawn_terminal(
     cmd.cwd(effective_dir);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    cmd.env("TERM_PROGRAM", "KKCoder");
+    cmd.env("TERM_PROGRAM", "AgentDesk");
 
     log_to_file("Spawning command in PTY slave...");
     let mut _child = pair.slave.spawn_command(cmd).map_err(|e: anyhow::Error| {
@@ -1814,7 +1814,7 @@ fn get_codex_version() -> Result<String, String> {
 // ==================== 会话名称自动修正 (移植自 rename 项目) ====================
 
 /// 将系统路径编码为 Claude Code 的项目目录名格式
-/// 例如: D:\MyCode\KKCODER → D--MyCode-KKCODER
+/// 例如: D:\MyCode\AgentDesk → D--MyCode-AgentDesk
 fn encode_claude_project_path(path: &str) -> String {
     path.replace(':', "-")
         .replace('\\', "-")
@@ -4234,7 +4234,7 @@ pub fn run() {
             
             // 2. 创建系统托盘右键菜单项
             let show_item = tauri::menu::MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
-            let quit_item = tauri::menu::MenuItem::with_id(app, "quit", "退出 KKCoder", true, None::<&str>)?;
+            let quit_item = tauri::menu::MenuItem::with_id(app, "quit", "退出 AgentDesk", true, None::<&str>)?;
             
             let menu = tauri::menu::MenuBuilder::new(app)
                 .item(&show_item)
@@ -4246,7 +4246,7 @@ pub fn run() {
             if let Some(i) = icon {
                 let _tray = tauri::tray::TrayIconBuilder::new()
                     .icon(i)
-                    .tooltip("KKCoder 极简 AI 终端管理器")
+                    .tooltip("AgentDesk AI 终端管理器")
                     .menu(&menu)
                     .show_menu_on_left_click(false) // 左键单击/双击用于显示窗口，右键才打开菜单
                     .on_menu_event(|app, event| {

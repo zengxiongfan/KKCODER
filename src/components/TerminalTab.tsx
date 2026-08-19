@@ -141,7 +141,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const userInputBufferRef = useRef<string>("");
   const atomicInputTagsRef = useRef<AtomicInputTag[]>([]);
   const atomicInputTagCounterRef = useRef<number>(0);
-  const autoTitleDoneStorageKey = `kkcoder_session_auto_title_done_${sessionId}`;
+  const autoTitleDoneStorageKey = `agentdesk_session_auto_title_done_${sessionId}`;
   const isPastingRef = useRef(false);
 
   // 1. 用于还原粘贴内容的缓存 Ref
@@ -206,12 +206,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     const fullMsg = `[JS][TerminalTab][${sessionId}][${time}] ${msg}`;
     console.log(fullMsg);
     try {
-      const existingLogs = JSON.parse(localStorage.getItem("kkcoder_logs") || "[]");
+      const existingLogs = JSON.parse(localStorage.getItem("agentdesk_logs") || "[]");
       existingLogs.push(fullMsg);
       if (existingLogs.length > 200) {
         existingLogs.shift();
       }
-      localStorage.setItem("kkcoder_logs", JSON.stringify(existingLogs));
+      localStorage.setItem("agentdesk_logs", JSON.stringify(existingLogs));
     } catch (e) {}
   };
 
@@ -321,13 +321,13 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     log("Initializing Terminal instance...");
     // 1. 根据当前选择的主题自适应配置终端黑白底色 (前三个黑底，后三个白底)
-    const savedTheme = localStorage.getItem("kkcoder_setting_theme") || "light-premium";
-    const savedFont = localStorage.getItem("kkcoder_setting_font_family") || "Cascadia Mono";
-    const savedSizeStr = localStorage.getItem("kkcoder_setting_font_size");
+    const savedTheme = localStorage.getItem("agentdesk_setting_theme") || "light-premium";
+    const savedFont = localStorage.getItem("agentdesk_setting_font_family") || "Cascadia Mono";
+    const savedSizeStr = localStorage.getItem("agentdesk_setting_font_size");
     const savedSize = savedSizeStr ? parseFloat(savedSizeStr) : 13.5;
     const initialColors = getTerminalThemeColors(savedTheme);
 
-    const savedScrollbackStr = localStorage.getItem("kkcoder_setting_scrollback");
+    const savedScrollbackStr = localStorage.getItem("agentdesk_setting_scrollback");
     let savedScrollback = savedScrollbackStr ? parseInt(savedScrollbackStr, 10) : 10000;
     if (isNaN(savedScrollback) || savedScrollback < 1000) {
       savedScrollback = 1000;
@@ -401,7 +401,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           });
         }
 
-        // 2. 匹配 Windows 路径 (形如 D:\MyCode\KKCODER 或 D:\MyCode\KKCODER\主题样式_spec.md)
+        // 2. 匹配 Windows 路径 (形如 D:\MyCode\AgentDesk 或 D:\MyCode\AgentDesk\主题样式_spec.md)
         // 有扩展名时：扩展名后遇到中文括号停止（解决 Claude Code 输出文件大小问题）
         // 无扩展名时：遇到中文括号停止
         const pathRegex = /[a-zA-Z]:\\(?:[^:?"*|<> \t\r\n（）]*\.[^:?"*|<> \t\r\n（）]*|[^\s:?"*|<>（）]+)/g;
@@ -609,7 +609,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         });
     };
 
-    window.addEventListener("kkcoder-insert-conversation-tag", handleInsertConversationTag);
+    window.addEventListener("agentdesk-insert-conversation-tag", handleInsertConversationTag);
 
     term.attachCustomKeyEventHandler((arg) => {
       if (arg.code === "Escape" || arg.key === "Escape") {
@@ -824,12 +824,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                   const elapsed = (Date.now() - commandStartTimeRef.current) / 1000;
                   log(`检测到 PTY 静默，延迟 ${delay}ms 后执行结束判定。本次持续耗时: ${elapsed.toFixed(2)} 秒`);
 
-                  const notifyEnabled = localStorage.getItem("kkcoder_setting_notify_on_complete") !== "false";
-                  const notifyThresholdStr = localStorage.getItem("kkcoder_setting_notify_threshold");
+                  const notifyEnabled = localStorage.getItem("agentdesk_setting_notify_on_complete") !== "false";
+                  const notifyThresholdStr = localStorage.getItem("agentdesk_setting_notify_threshold");
                   const notifyThreshold = notifyThresholdStr ? parseFloat(notifyThresholdStr) : 2.0;
-                  const playSoundEnabled = localStorage.getItem("kkcoder_setting_play_sound") !== "false";
-                  const soundTone = localStorage.getItem("kkcoder_setting_sound_tone") || "dingdong";
-                  const soundVolumeStr = localStorage.getItem("kkcoder_setting_sound_volume");
+                  const playSoundEnabled = localStorage.getItem("agentdesk_setting_play_sound") !== "false";
+                  const soundTone = localStorage.getItem("agentdesk_setting_sound_tone") || "dingdong";
+                  const soundVolumeStr = localStorage.getItem("agentdesk_setting_sound_volume");
                   const soundVolume = soundVolumeStr ? parseInt(soundVolumeStr, 10) : 80;
 
                   if (notifyEnabled && elapsed >= notifyThreshold) {
@@ -838,7 +838,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                     invoke("play_notification_sound", {
                       tone: soundTone,
                       volume: soundVolume,
-                      title: "KKCoder AI 终端",
+                      title: "AgentDesk AI 终端",
                       message: playSoundEnabled 
                         ? `回答完毕！本次运行共耗时 ${elapsed.toFixed(1)} 秒。`
                         : null // 若不启用播放提示音，则仅通过 null 标记静默通知
@@ -910,7 +910,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             const finalName = deriveSessionTitleFromInput(rawInput);
             if (finalName && onRenameSession) {
               localStorage.setItem(autoTitleDoneStorageKey, "true");
-              localStorage.setItem(`kkcoder_session_has_dialogue_${sessionId}`, "true");
+              localStorage.setItem(`agentdesk_session_has_dialogue_${sessionId}`, "true");
               log(`Auto-renaming session ${sessionId} to: "${finalName}"`);
               onRenameSession(sessionId, finalName);
             } else {
@@ -983,7 +983,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         ptyReadyRef.current = false;
         log(`Backend spawn_terminal REJECTED: ${err}`);
         term.write(
-          `\r\n\x1b[31m[KKCoder 核心错误] 无法拉起本地虚拟终端: ${err}\x1b[0m\r\n`
+          `\r\n\x1b[31m[AgentDesk 核心错误] 无法拉起本地虚拟终端: ${err}\x1b[0m\r\n`
         );
       });
 
@@ -1063,7 +1063,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       const newColors = getTerminalThemeColors(newTheme);
       term.options.theme = newColors;
     };
-    window.addEventListener("kkcoder-theme-change", handleThemeChange);
+    window.addEventListener("agentdesk-theme-change", handleThemeChange);
 
     // 7b. 监听终端字体切换的全局自定义事件，实现 PTY 终端字体实时更新
     const handleFontChange = (e: Event) => {
@@ -1072,7 +1072,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       log(`Received font change event: font=${newFont}`);
       term.options.fontFamily = `${newFont}, Fira Code, Consolas, Monaco, monospace`;
     };
-    window.addEventListener("kkcoder-font-change", handleFontChange);
+    window.addEventListener("agentdesk-font-change", handleFontChange);
 
     // 7c. 监听终端字号切换的全局自定义事件，实现 PTY 终端字号实时更新并自动重测尺寸
     const handleFontSizeChange = (e: Event) => {
@@ -1085,7 +1085,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         scheduleTerminalFit("font-size-change", { forceScrollToBottom: true });
       }
     };
-    window.addEventListener("kkcoder-font-size-change", handleFontSizeChange);
+    window.addEventListener("agentdesk-font-size-change", handleFontSizeChange);
 
     return () => {
       log("TerminalTab unmounting. Cleaning up...");
@@ -1111,10 +1111,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         parentElement.removeEventListener("scroll", handleScrollCapture, true);
       }
       resizeObserver.disconnect();
-      window.removeEventListener("kkcoder-theme-change", handleThemeChange);
-      window.removeEventListener("kkcoder-font-change", handleFontChange);
-      window.removeEventListener("kkcoder-font-size-change", handleFontSizeChange);
-      window.removeEventListener("kkcoder-insert-conversation-tag", handleInsertConversationTag);
+      window.removeEventListener("agentdesk-theme-change", handleThemeChange);
+      window.removeEventListener("agentdesk-font-change", handleFontChange);
+      window.removeEventListener("agentdesk-font-size-change", handleFontSizeChange);
+      window.removeEventListener("agentdesk-insert-conversation-tag", handleInsertConversationTag);
       // 清理 codex session 反查轮询
       if (codexPollTimerRef.current) {
         clearInterval(codexPollTimerRef.current);
@@ -1153,9 +1153,9 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         xtermRef.current.focus();
       }
     };
-    window.addEventListener("kkcoder-focus-active-terminal", handleFocusRequest);
+    window.addEventListener("agentdesk-focus-active-terminal", handleFocusRequest);
     return () => {
-      window.removeEventListener("kkcoder-focus-active-terminal", handleFocusRequest);
+      window.removeEventListener("agentdesk-focus-active-terminal", handleFocusRequest);
     };
   }, [isActive]);
 
@@ -1235,8 +1235,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       setTimeout(() => tryScroll(0), 80);
     };
 
-    window.addEventListener("kkcoder-scroll-to-anchor", handler);
-    return () => window.removeEventListener("kkcoder-scroll-to-anchor", handler);
+    window.addEventListener("agentdesk-scroll-to-anchor", handler);
+    return () => window.removeEventListener("agentdesk-scroll-to-anchor", handler);
   }, [sessionId]);
 
   return (

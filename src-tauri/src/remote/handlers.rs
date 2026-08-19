@@ -14,7 +14,7 @@ fn log_to_file(message: &str) {
         .create(true)
         .write(true)
         .append(true)
-        .open("kkcoder_debug.log")
+        .open("agentdesk_debug.log")
     {
         let now = std::time::SystemTime::now();
         let since = now

@@ -134,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // 记住收藏的项目状态
   const [favoriteProjects, setFavoriteProjects] = useState<Array<{ name: string; timestamp: number }>>(() => {
     try {
-      const stored = localStorage.getItem("kkcoder_favorite_projects");
+      const stored = localStorage.getItem("agentdesk_favorite_projects");
       return stored ? JSON.parse(stored) : [];
     } catch (e) {
       return [];
@@ -142,13 +142,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_favorite_projects", JSON.stringify(favoriteProjects));
+    localStorage.setItem("agentdesk_favorite_projects", JSON.stringify(favoriteProjects));
   }, [favoriteProjects]);
 
   // 记住项目最后访问时间（打开会话时更新），用于项目排序
   const [projectLastAccessed, setProjectLastAccessed] = useState<Record<string, number>>(() => {
     try {
-      const stored = localStorage.getItem("kkcoder_project_last_accessed");
+      const stored = localStorage.getItem("agentdesk_project_last_accessed");
       return stored ? JSON.parse(stored) : {};
     } catch (e) {
       return {};
@@ -156,7 +156,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   });
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_project_last_accessed", JSON.stringify(projectLastAccessed));
+    localStorage.setItem("agentdesk_project_last_accessed", JSON.stringify(projectLastAccessed));
   }, [projectLastAccessed]);
 
   // 归档区状态

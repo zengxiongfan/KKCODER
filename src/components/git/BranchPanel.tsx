@@ -252,7 +252,7 @@ export const BranchPanel: React.FC<BranchPanelProps> = ({ projectPath, onAddLine
   const [fetching, setFetching] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [pullStrategy] = useState<string>(
-    () => localStorage.getItem("kkcoder_git_pull_strategy") || "merge"
+    () => localStorage.getItem("agentdesk_git_pull_strategy") || "merge"
   );
 
   const projectPathRef = useRef(projectPath);

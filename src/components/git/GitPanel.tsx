@@ -589,7 +589,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const [statusFilter, setStatusFilter] = useState<GitStatusFilter>("all");
   // 视图模式：平铺 / 目录树 / 模块（持久化，默认平铺——VSCode 同款默认）
   const [groupBy, setGroupBy] = useState<GroupByMode>(() => {
-    const saved = localStorage.getItem("kkcoder_git_groupby");
+    const saved = localStorage.getItem("agentdesk_git_groupby");
     return saved === "directory" || saved === "module" ? saved : "list";
   });
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
@@ -609,17 +609,17 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const [branchFilter, setBranchFilter] = useState("");
   const [switchingBranch, setSwitchingBranch] = useState(false);
   const [commitMode, setCommitMode] = useState<"commit" | "commit-push">(() =>
-    localStorage.getItem("kkcoder_git_commit_mode") === "commit-push" ? "commit-push" : "commit"
+    localStorage.getItem("agentdesk_git_commit_mode") === "commit-push" ? "commit-push" : "commit"
   );
   const [commitMenuOpen, setCommitMenuOpen] = useState(false);
   const [publishMenuOpen, setPublishMenuOpen] = useState(false);
   const [remotes, setRemotes] = useState<string[]>([]);
   const [publishRemote, setPublishRemote] = useState<string>(
-    () => localStorage.getItem("kkcoder_git_publish_remote") || ""
+    () => localStorage.getItem("agentdesk_git_publish_remote") || ""
   );
   const [syncing, setSyncing] = useState(false);
   const [pullStrategy, setPullStrategy] = useState<string>(
-    () => localStorage.getItem("kkcoder_git_pull_strategy") || "merge"
+    () => localStorage.getItem("agentdesk_git_pull_strategy") || "merge"
   );
 
   const [commitMsg, setCommitMsg] = useState("");
@@ -904,7 +904,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const handleGroupByChange = (mode: GroupByMode) => {
     setMoreMenuOpen(false);
     setGroupBy(mode);
-    localStorage.setItem("kkcoder_git_groupby", mode);
+    localStorage.setItem("agentdesk_git_groupby", mode);
   };
 
   // 视图单图标循环切换：平铺 → 目录树 → 模块
@@ -1054,7 +1054,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
     setPublishMenuOpen(false);
     if (pushing || !branchStatus?.branch) return;
     setPublishRemote(remote);
-    localStorage.setItem("kkcoder_git_publish_remote", remote);
+    localStorage.setItem("agentdesk_git_publish_remote", remote);
     setPushing(true);
     try {
       await invoke("git_push", {
@@ -1192,7 +1192,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
   const handlePull = async (strategy: string) => {
     setPullMenuOpen(false);
     setPullStrategy(strategy);
-    localStorage.setItem("kkcoder_git_pull_strategy", strategy);
+    localStorage.setItem("agentdesk_git_pull_strategy", strategy);
     setPulling(true);
     try {
       await invoke("git_pull", { projectPath: repoPath, strategy });
@@ -1810,7 +1810,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                     className={`git-dropdown-item ${commitMode === "commit" ? "active" : ""}`}
                     onClick={() => {
                       setCommitMode("commit");
-                      localStorage.setItem("kkcoder_git_commit_mode", "commit");
+                      localStorage.setItem("agentdesk_git_commit_mode", "commit");
                       setCommitMenuOpen(false);
                     }}
                   >
@@ -1821,7 +1821,7 @@ export const GitPanel: React.FC<GitPanelProps> = ({ projectPath, onInsertPathToT
                     className={`git-dropdown-item ${commitMode === "commit-push" ? "active" : ""}`}
                     onClick={() => {
                       setCommitMode("commit-push");
-                      localStorage.setItem("kkcoder_git_commit_mode", "commit-push");
+                      localStorage.setItem("agentdesk_git_commit_mode", "commit-push");
                       setCommitMenuOpen(false);
                     }}
                   >

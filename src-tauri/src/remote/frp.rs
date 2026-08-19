@@ -29,7 +29,7 @@ impl FrpManager {
         }
 
         // 生成 frpc.toml 配置文件
-        let config_dir = std::env::temp_dir().join("kkcoder_frp");
+        let config_dir = std::env::temp_dir().join("agentdesk_frp");
         std::fs::create_dir_all(&config_dir)
             .map_err(|e| format!("Failed to create frp config dir: {}", e))?;
 
@@ -45,7 +45,7 @@ serverPort = {}
 auth.token = "{}"{}
 
 [[proxies]]
-name = "kkcoder-remote"
+name = "agentdesk-remote"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = {}
@@ -170,7 +170,7 @@ fn log_to_file(message: &str) {
         .create(true)
         .write(true)
         .append(true)
-        .open("kkcoder_debug.log")
+        .open("agentdesk_debug.log")
     {
         let now = std::time::SystemTime::now();
         let since = now

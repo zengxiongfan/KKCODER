@@ -15,14 +15,14 @@ const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
 const CODEX_NPM_PACKAGE = "@openai/codex";
 
 // 会话名称修正 localStorage keys
-const AUTO_RENAME_ON_STARTUP_KEY = "kkcoder_setting_auto_rename_startup";
-const AUTO_RENAME_ON_IDLE_KEY = "kkcoder_setting_auto_rename_idle";
-const AUTO_RENAME_SKIP_FAVORITES_KEY = "kkcoder_setting_auto_rename_skip_favorites";
-const NAMER_MODE_KEY = "kkcoder_setting_namer_mode";
-const LLM_API_URL_KEY = "kkcoder_setting_llm_api_url";
-const LLM_API_KEY_KEY = "kkcoder_setting_llm_api_key";
-const LLM_MODEL_KEY = "kkcoder_setting_llm_model";
-const IDLE_MINUTES_KEY = "kkcoder_setting_idle_minutes";
+const AUTO_RENAME_ON_STARTUP_KEY = "agentdesk_setting_auto_rename_startup";
+const AUTO_RENAME_ON_IDLE_KEY = "agentdesk_setting_auto_rename_idle";
+const AUTO_RENAME_SKIP_FAVORITES_KEY = "agentdesk_setting_auto_rename_skip_favorites";
+const NAMER_MODE_KEY = "agentdesk_setting_namer_mode";
+const LLM_API_URL_KEY = "agentdesk_setting_llm_api_url";
+const LLM_API_KEY_KEY = "agentdesk_setting_llm_api_key";
+const LLM_MODEL_KEY = "agentdesk_setting_llm_model";
+const IDLE_MINUTES_KEY = "agentdesk_setting_idle_minutes";
 
 interface RenameResult {
   session_id: string;
@@ -336,7 +336,7 @@ const RemoteSettingsPanel: React.FC = () => {
                 <input type="text" value={publicUrl}
                   onChange={(e) => { setPublicUrl(e.target.value); setTestResult(null); }}
                   onBlur={handleSavePublicUrl}
-                  placeholder="https://kkcoder.example.com 或 http://IP:端口"
+                  placeholder="https://agentdesk.example.com 或 http://IP:端口"
                   style={{ ...inputStyle, flex: 1 }}
                 />
                 <button onClick={handleTestUrl} disabled={testing || !publicUrl.trim()}
@@ -653,27 +653,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   // --- 1. 读取并配置各项通用设置 (持久化存储) ---
   const [theme, setTheme] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_theme") || "light-premium";
+    return localStorage.getItem("agentdesk_setting_theme") || "light-premium";
   });
   // Language state removed to satisfy TS6133 strict check
   const [closeBehavior, setCloseBehavior] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_close_behavior") || "exit";
+    return localStorage.getItem("agentdesk_setting_close_behavior") || "exit";
   });
   const [notifyOnComplete, setNotifyOnComplete] = useState<boolean>(() => {
-    const val = localStorage.getItem("kkcoder_setting_notify_on_complete");
+    const val = localStorage.getItem("agentdesk_setting_notify_on_complete");
     return val === null ? true : val === "true";
   });
   const [notifyThreshold, setNotifyThreshold] = useState<number>(() => {
-    const val = localStorage.getItem("kkcoder_setting_notify_threshold");
+    const val = localStorage.getItem("agentdesk_setting_notify_threshold");
     return val === null ? 2.0 : parseFloat(val);
   });
 
   // --- Claude Code / Codex CLI 工具状态 ---
   const [claudeInstalled, setClaudeInstalled] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_cached_claude_version") || "";
+    return localStorage.getItem("agentdesk_cached_claude_version") || "";
   });
   const [codexInstalled, setCodexInstalled] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_cached_codex_version") || "";
+    return localStorage.getItem("agentdesk_cached_codex_version") || "";
   });
 
   // 从 "Claude Code 2.1.206" 提取纯版本号 "2.1.206"
@@ -687,8 +687,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
     invoke<string>("get_claude_version")
       .then((ver) => {
         setClaudeInstalled(ver);
-        localStorage.setItem("kkcoder_cached_claude_version", ver);
-        window.dispatchEvent(new CustomEvent("kkcoder-claude-version-change", { detail: ver }));
+        localStorage.setItem("agentdesk_cached_claude_version", ver);
+        window.dispatchEvent(new CustomEvent("agentdesk-claude-version-change", { detail: ver }));
       })
       .catch(() => {});
   };
@@ -705,8 +705,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
           return trimmed ? `Codex ${trimmed}` : "Codex";
         })();
         setCodexInstalled(normalized);
-        localStorage.setItem("kkcoder_cached_codex_version", normalized);
-        window.dispatchEvent(new CustomEvent("kkcoder-codex-version-change", { detail: normalized }));
+        localStorage.setItem("agentdesk_cached_codex_version", normalized);
+        window.dispatchEvent(new CustomEvent("agentdesk-codex-version-change", { detail: normalized }));
       })
       .catch(() => {});
   };
@@ -738,32 +738,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   }, []);
 
   const [playSound, setPlaySound] = useState<boolean>(() => {
-    const val = localStorage.getItem("kkcoder_setting_play_sound");
+    const val = localStorage.getItem("agentdesk_setting_play_sound");
     return val === null ? true : val === "true";
   });
   const [soundTone, setSoundTone] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_sound_tone") || "dingdong";
+    return localStorage.getItem("agentdesk_setting_sound_tone") || "dingdong";
   });
   const [soundVolume, setSoundVolume] = useState<number>(() => {
-    const val = localStorage.getItem("kkcoder_setting_sound_volume");
+    const val = localStorage.getItem("agentdesk_setting_sound_volume");
     return val === null ? 80 : parseInt(val, 10);
   });
   const [fontFamily, setFontFamily] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_font_family") || "Cascadia Mono";
+    return localStorage.getItem("agentdesk_setting_font_family") || "Cascadia Mono";
   });
   const [fontSize, setFontSize] = useState<number>(() => {
-    const val = localStorage.getItem("kkcoder_setting_font_size");
+    const val = localStorage.getItem("agentdesk_setting_font_size");
     return val === null ? 13.5 : parseFloat(val);
   });
   const [previewFontFamily, setPreviewFontFamily] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_preview_font_family") || "monospace";
+    return localStorage.getItem("agentdesk_setting_preview_font_family") || "monospace";
   });
   const [previewFontSize, setPreviewFontSize] = useState<number>(() => {
-    const val = localStorage.getItem("kkcoder_setting_preview_font_size");
+    const val = localStorage.getItem("agentdesk_setting_preview_font_size");
     return val === null ? 12.5 : parseFloat(val);
   });
   const [scrollback, setScrollback] = useState<number>(() => {
-    const val = localStorage.getItem("kkcoder_setting_scrollback");
+    const val = localStorage.getItem("agentdesk_setting_scrollback");
     return val === null ? 10000 : parseInt(val, 10);
   });
   const [sessionCleanupEnabled, setSessionCleanupEnabled] = useState<boolean>(() => {
@@ -774,12 +774,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   });
 
   const [shortcutsEnabled, setShortcutsEnabled] = useState<boolean>(() => {
-    const val = localStorage.getItem("kkcoder_shortcuts_enabled");
+    const val = localStorage.getItem("agentdesk_shortcuts_enabled");
     return val === null ? false : val === "true";
   });
 
   const [shortcutsList, setShortcutsList] = useState<{ title: string; content: string }[]>(() => {
-    const val = localStorage.getItem("kkcoder_shortcuts_list");
+    const val = localStorage.getItem("agentdesk_shortcuts_list");
     if (val) {
       try {
         const parsed = JSON.parse(val);
@@ -801,12 +801,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   });
 
   const [ccswitchPath, setCcswitchPath] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+    return localStorage.getItem("agentdesk_setting_ccswitch_path") || "";
   });
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_ccswitch_path", ccswitchPath);
-    window.dispatchEvent(new CustomEvent("kkcoder-ccswitch-path-change", { detail: ccswitchPath }));
+    localStorage.setItem("agentdesk_setting_ccswitch_path", ccswitchPath);
+    window.dispatchEvent(new CustomEvent("agentdesk-ccswitch-path-change", { detail: ccswitchPath }));
   }, [ccswitchPath]);
 
 
@@ -846,9 +846,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   // --- 2. 写入各项设置至 localStorage ---
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_theme", theme);
+    localStorage.setItem("agentdesk_setting_theme", theme);
     applyTheme(theme);
-    window.dispatchEvent(new CustomEvent("kkcoder-theme-change", { detail: theme }));
+    window.dispatchEvent(new CustomEvent("agentdesk-theme-change", { detail: theme }));
   }, [theme]);
 
   // 监听外部（如调色盘）的主题变动事件以同步本地 theme 状态
@@ -860,52 +860,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
         setTheme(newTheme);
       }
     };
-    window.addEventListener("kkcoder-theme-change", handleExternalThemeChange);
-    return () => window.removeEventListener("kkcoder-theme-change", handleExternalThemeChange);
+    window.addEventListener("agentdesk-theme-change", handleExternalThemeChange);
+    return () => window.removeEventListener("agentdesk-theme-change", handleExternalThemeChange);
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_close_behavior", closeBehavior);
+    localStorage.setItem("agentdesk_setting_close_behavior", closeBehavior);
   }, [closeBehavior]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_notify_on_complete", String(notifyOnComplete));
+    localStorage.setItem("agentdesk_setting_notify_on_complete", String(notifyOnComplete));
   }, [notifyOnComplete]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_notify_threshold", String(notifyThreshold));
+    localStorage.setItem("agentdesk_setting_notify_threshold", String(notifyThreshold));
   }, [notifyThreshold]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_play_sound", String(playSound));
+    localStorage.setItem("agentdesk_setting_play_sound", String(playSound));
   }, [playSound]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_sound_tone", soundTone);
+    localStorage.setItem("agentdesk_setting_sound_tone", soundTone);
   }, [soundTone]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_sound_volume", String(soundVolume));
+    localStorage.setItem("agentdesk_setting_sound_volume", String(soundVolume));
   }, [soundVolume]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_font_family", fontFamily);
-    window.dispatchEvent(new CustomEvent("kkcoder-font-change", { detail: fontFamily }));
+    localStorage.setItem("agentdesk_setting_font_family", fontFamily);
+    window.dispatchEvent(new CustomEvent("agentdesk-font-change", { detail: fontFamily }));
   }, [fontFamily]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_font_size", String(fontSize));
-    window.dispatchEvent(new CustomEvent("kkcoder-font-size-change", { detail: fontSize }));
+    localStorage.setItem("agentdesk_setting_font_size", String(fontSize));
+    window.dispatchEvent(new CustomEvent("agentdesk-font-size-change", { detail: fontSize }));
   }, [fontSize]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_preview_font_family", previewFontFamily);
-    window.dispatchEvent(new CustomEvent("kkcoder-preview-font-change", { detail: previewFontFamily }));
+    localStorage.setItem("agentdesk_setting_preview_font_family", previewFontFamily);
+    window.dispatchEvent(new CustomEvent("agentdesk-preview-font-change", { detail: previewFontFamily }));
   }, [previewFontFamily]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_preview_font_size", String(previewFontSize));
-    window.dispatchEvent(new CustomEvent("kkcoder-preview-font-size-change", { detail: previewFontSize }));
+    localStorage.setItem("agentdesk_setting_preview_font_size", String(previewFontSize));
+    window.dispatchEvent(new CustomEvent("agentdesk-preview-font-size-change", { detail: previewFontSize }));
   }, [previewFontSize]);
 
   useEffect(() => {
@@ -913,7 +913,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   }, [sessionCleanupEnabled]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_scrollback", String(scrollback));
+    localStorage.setItem("agentdesk_setting_scrollback", String(scrollback));
   }, [scrollback]);
 
   useEffect(() => {
@@ -921,13 +921,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   }, [sessionCleanupDays]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_shortcuts_enabled", String(shortcutsEnabled));
-    window.dispatchEvent(new Event("kkcoder-shortcuts-change"));
+    localStorage.setItem("agentdesk_shortcuts_enabled", String(shortcutsEnabled));
+    window.dispatchEvent(new Event("agentdesk-shortcuts-change"));
   }, [shortcutsEnabled]);
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_shortcuts_list", JSON.stringify(shortcutsList));
-    window.dispatchEvent(new Event("kkcoder-shortcuts-change"));
+    localStorage.setItem("agentdesk_shortcuts_list", JSON.stringify(shortcutsList));
+    window.dispatchEvent(new Event("agentdesk-shortcuts-change"));
   }, [shortcutsList]);
 
   useEffect(() => {
@@ -1112,7 +1112,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
           return;
         }
         let lastTimes: Record<string, number> = {};
-        try { lastTimes = JSON.parse(localStorage.getItem("kkcoder_last_rename_times") || "{}"); } catch {}
+        try { lastTimes = JSON.parse(localStorage.getItem("agentdesk_last_rename_times") || "{}"); } catch {}
         results = await invoke<RenameResult[]>("llm_rename_sessions", {
           apiUrl: llmApiUrl,
           apiKey: llmApiKey,
@@ -1126,7 +1126,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
         for (const r of results.filter((r) => r.changed)) {
           lastTimes[r.session_id] = now;
         }
-        try { localStorage.setItem("kkcoder_last_rename_times", JSON.stringify(lastTimes)); } catch {}
+        try { localStorage.setItem("agentdesk_last_rename_times", JSON.stringify(lastTimes)); } catch {}
       } else {
         results = await invoke<RenameResult[]>("auto_rename_sessions", {
           skipFavorites: autoRenameSkipFavorites,
@@ -1296,7 +1296,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
                   <button
                     className="settings-toggle-btn"
                     onClick={() => {
-                      const path = localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+                      const path = localStorage.getItem("agentdesk_setting_ccswitch_path") || "";
                       if (!path) {
                         alert("请先在「CC Switch」中配置 ccswitch.exe 的路径。");
                         return;
@@ -2024,14 +2024,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
             ) : (
               <div className="settings-content about-page">
                 <div className="about-logo">KK</div>
-                <div className="about-title">KKCoder AI 终端管理器</div>
+                <div className="about-title">AgentDesk AI 终端管理器</div>
                 <div className="about-version">版本: v1.2.0</div>
                 <div className="about-desc">
                   极简、现代、克制的 AI 终端托管管理器。基于 Tauri 框架与 React 深度构建，为您提供丝滑的原生开发虚拟终端心流体验。
                 </div>
                 <div className="about-divider"></div>
                 <div className="about-meta">
-                  <p>© 2026 KKCoder Studio. All rights reserved.</p>
+                  <p>© 2026 AgentDesk Studio. All rights reserved.</p>
                   <p>由 Google DeepMind AAC 团队荣誉驱动</p>
                 </div>
               </div>

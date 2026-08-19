@@ -59,7 +59,7 @@ monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
 
 // ── 动态主题：跟随应用当前主题的 CSS 变量（--bg-main 等），切主题即时同步 ──
 
-const DYNAMIC_THEME = "kkcoder-auto";
+const DYNAMIC_THEME = "agentdesk-auto";
 
 // 读 CSS 变量并归一化为 Monaco 可用的 hex 颜色（支持 #rgb/#rrggbb/rgb()/rgba()）
 function readCssColor(name: string, fallback: string): string {

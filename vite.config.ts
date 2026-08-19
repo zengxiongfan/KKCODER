@@ -28,8 +28,8 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri` and database/log/journal files to avoid full page reloads
       ignored: [
         "**/src-tauri/**",
-        "**/kkcoder.db*",
-        "**/kkcoder_debug.log"
+        "**/agentdesk.db*",
+        "**/agentdesk_debug.log"
       ],
     },
   },
