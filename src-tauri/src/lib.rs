@@ -10,6 +10,9 @@ use dirs;
 mod remote;
 mod commands;
 mod git_watcher;
+mod claude_chat;
+mod git;
+mod claude_model;
 
 // 极其可靠的本地调试文件日志输出器，自动写入 agentdesk_debug.log 以便于闪退后追溯
 fn log_to_file(message: &str) {
@@ -25,6 +28,11 @@ fn log_to_file(message: &str) {
         let since_the_epoch = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
         let _ = writeln!(file, "[Timestamp: {}ms] {}", since_the_epoch.as_millis(), message);
     }
+}
+
+/// 会话维度日志（GUI 聊天链路使用）：本地简化为合并写入全局调试日志
+pub(crate) fn log_session(session_id: &str, message: &str) {
+    log_to_file(&format!("[session:{session_id}] {message}"));
 }
 
 pub struct ActiveSession {
@@ -4221,10 +4229,15 @@ pub fn run() {
     pty_manager.session_registry = Some(session_registry.clone());
     pty_manager.conversation = Some(conversation_state.clone());
 
+    // 清理 24 小时前残留的 claude 临时 settings 文件（供应商直连，防堆积）
+    claude_model::cleanup_stale_settings_override_files();
+
     tauri::Builder::default()
         .manage(pty_manager)
         .manage(remote::frp::FrpManager::new())
         .manage(git_watcher::GitWatcherBridge::new())
+        .manage(claude_chat::ClaudeChatManager::default())
+        .manage(claude_model::ClaudeModelState::default())
         .plugin(tauri_plugin_opener::init())
         .setup(move |app| {
             use tauri::Manager;
@@ -4438,7 +4451,28 @@ pub fn run() {
             commands::git::git_commit_stat,
             commands::git::git_commit_files,
             commands::git::git_commit_file_diff,
-            commands::git::git_file_content
+            commands::git::git_file_content,
+            // Claude GUI 聊天命令
+            claude_chat::chat_send_message,
+            claude_chat::chat_cancel,
+            claude_chat::chat_get_history,
+            claude_chat::chat_answer_question,
+            claude_chat::chat_answer_plan_approval,
+            claude_chat::chat_get_latest_plan,
+            claude_chat::chat_reset_context,
+            claude_chat::chat_get_context_usage,
+            claude_chat::catalog::chat_search_project_entries,
+            claude_chat::catalog::chat_get_slash_items,
+            // Claude 模型/供应商选择（CC Switch）与 Git 分支（聊天输入区）
+            claude_model::claude_model_info,
+            claude_model::set_claude_model,
+            claude_model::set_claude_provider,
+            git::get_git_branch_info,
+            git::init_git_repo,
+            git::switch_git_branch,
+            git::stash_and_switch_git_branch,
+            git::create_git_branch,
+            git::pull_git_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { Sidebar, Session, ClaudeIcon, CodexIcon } from "./components/Sidebar";
 import { TerminalTab } from "./components/TerminalTab";
+import { ChatTab } from "./components";
 import { NewSessionModal } from "./components/NewSessionModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { MdEditorModal } from "./components/MdEditorModal";
@@ -13,6 +14,10 @@ import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { FileEditor, type FileEditorHandle } from "./components/FileEditor";
 import { FileText, Folder, GitBranch, GitCommit } from "lucide-react";
+import { AppToastHost } from "./components/AppToastHost";
+import { ConfirmModal } from "./components/ConfirmModal";
+import { useAppFeedback } from "./hooks";
+import { notifyWarning, formatFeedbackError } from "./utils/appFeedback";
 import {
   addUnreadCompletion,
   getUnreadCompletionCount,
@@ -21,6 +26,21 @@ import {
 import { updateSessionLastUserMessageAt } from "./utils/sessionActivity";
 import { readSessionCleanupSettings } from "./utils/sessionCleanup";
 import { shouldResumeSession } from "./utils/sessionResume";
+import {
+  CLAUDE_INTERACTION_MODE_KEY,
+  CLAUDE_INTERACTION_MODE_CHANGE_EVENT,
+  resolveClaudeInteractionMode,
+  shouldUseGuiChat,
+  type ClaudeInteractionMode,
+} from "./utils/interactionMode";
+import {
+  loadClaudeModelInfo,
+  loadSelectedModel,
+  saveSelectedModel,
+  setClaudeModelBackend,
+  setClaudeProviderBackend,
+  type ClaudeModelInfo,
+} from "./utils/claudeModel";
 import { syncTaskbarUnreadBadge } from "./utils/taskbarBadge";
 import "./App.css";
 
@@ -136,6 +156,126 @@ function App() {
   const [openTabIds, setOpenTabIds] = useState<string[]>([]);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<"claude" | "codex">("claude");
+  const [claudeInteractionMode, _setClaudeInteractionMode] = useState<ClaudeInteractionMode>(() => {
+    return resolveClaudeInteractionMode(localStorage.getItem(CLAUDE_INTERACTION_MODE_KEY));
+  });
+  const [interactionModeBySession, _setInteractionModeBySession] = useState<Record<string, ClaudeInteractionMode>>({});
+
+  // 设置中心切换交互模式时实时生效（无桌面监听时默认回退 CLI 由 useCallback 重新解析）
+  useEffect(() => {
+    const handleInteractionModeChange = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      const next = resolveClaudeInteractionMode(detail ?? null);
+      _setClaudeInteractionMode(next);
+      log(`[app] interaction mode changed -> ${next}`);
+    };
+    window.addEventListener(CLAUDE_INTERACTION_MODE_CHANGE_EVENT, handleInteractionModeChange);
+    return () => window.removeEventListener(CLAUDE_INTERACTION_MODE_CHANGE_EVENT, handleInteractionModeChange);
+  }, []);
+
+  // 模型选择：读取 CC Switch 维护的 ~/.claude/settings.json 清单，
+  // 选中即写入 localStorage 并同步后端全局状态（两处 claude 启动都从后端读）
+  const [selectedModel, setSelectedModel] = useState<string | null>(() => loadSelectedModel());
+  const [modelInfo, setModelInfo] = useState<ClaudeModelInfo | null>(null);
+  // 变更检测用的上一次信息 + 失效提示去重标记
+  const modelInfoRef = useRef<ClaudeModelInfo | null>(null);
+  const notifiedRemovedModelRef = useRef<string | null>(null);
+  const notifiedProviderRemovedRef = useRef(false);
+
+  // 刷新模型信息：拉取后做变更检测，关键字段没变就不更新（避免每 10s 轮询触发全量重渲染）
+  const refreshModelInfo = useCallback(() => {
+    loadClaudeModelInfo()
+      .then((info) => {
+        const prev = modelInfoRef.current;
+        const unchanged =
+          !!prev &&
+          prev.providerName === info.providerName &&
+          prev.routeMode === info.routeMode &&
+          prev.providerRemoved === info.providerRemoved &&
+          prev.defaultModel === info.defaultModel &&
+          prev.models.join("|") === info.models.join("|") &&
+          prev.providers.map((p) => p.id).join("|") ===
+            info.providers.map((p) => p.id).join("|");
+        if (unchanged) return;
+        modelInfoRef.current = info;
+        setModelInfo(info);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshModelInfo();
+    // 启动时把持久化的选择同步给后端（后端重启后需要重建）
+    setClaudeModelBackend(loadSelectedModel());
+    // 窗口重新获得焦点时刷新 + 每 10s 轻量轮询：
+    // CC Switch 增删供应商/模型、改旋钮 → 最多 10s 内自动同步，无需手动操作
+    const onFocus = () => refreshModelInfo();
+    window.addEventListener("focus", onFocus);
+    const timer = window.setInterval(refreshModelInfo, 10_000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(timer);
+    };
+  }, [refreshModelInfo]);
+
+  // 已选模型失效：被删除/改名 → 自动清空回默认 + 提示（每个失效模型只提示一次）
+  useEffect(() => {
+    if (!modelInfo) return;
+    const selected = selectedModel;
+    if (selected && modelInfo.models.length > 0 && !modelInfo.models.includes(selected)) {
+      if (notifiedRemovedModelRef.current !== selected) {
+        notifiedRemovedModelRef.current = selected;
+        notifyWarning(`已选模型 ${selected} 已不在 CC Switch 配置中，已恢复为该供应商默认`);
+      }
+      setSelectedModel(null);
+      setClaudeModelBackend(null);
+      saveSelectedModel(null);
+    } else {
+      notifiedRemovedModelRef.current = null;
+    }
+  }, [modelInfo, selectedModel]);
+
+  // 当前直连的供应商被删除/改名：提示一次（路由模式下由代理接管，不提示）
+  useEffect(() => {
+    if (!modelInfo) return;
+    if (modelInfo.providerRemoved && !notifiedProviderRemovedRef.current) {
+      notifiedProviderRemovedRef.current = true;
+      notifyWarning("当前直连的供应商已不在 CC Switch 列表中（可能被删除或改名）");
+    }
+    if (!modelInfo.providerRemoved) notifiedProviderRemovedRef.current = false;
+  }, [modelInfo]);
+
+  const handleSelectModel = useCallback((model: string | null) => {
+    setSelectedModel(model);
+    setClaudeModelBackend(model);
+    saveSelectedModel(model);
+  }, []);
+
+  // 选择供应商：只记录到 KKCODER 自己（内存 + localStorage），不写任何外部配置。
+  // 启动 claude 时用所选供应商 env 生成临时 settings 文件（--settings 直连），
+  // ~/.claude/settings.json 与 cc-switch.db 保持原样（避免 CC Switch 回写污染）。
+  // 仅路由供应商（routeOnly）claude 无法直连，提示改用 CC Switch。
+  const handleSelectProvider = useCallback((providerId: string) => {
+    const routeOnly = modelInfo?.providers.find((p) => p.id === providerId)?.routeOnly;
+    if (routeOnly) {
+      notifyWarning("该供应商需要 CC Switch 路由代理才能使用，选择后仍由 CC Switch 当前配置转发；请在 CC Switch 中切换该供应商");
+    }
+    setSelectedModel(null);
+    setClaudeModelBackend(null);
+    saveSelectedModel(null);
+    setClaudeProviderBackend(providerId)
+      .then((info) => {
+        modelInfoRef.current = info;
+        setModelInfo(info);
+      })
+      .catch((err) => {
+        refreshModelInfo();
+        notifyWarning(formatFeedbackError(err, "选择供应商失败"));
+      });
+  }, [refreshModelInfo, modelInfo?.providers]);
+
+  // 应用级反馈宿主：承接 appFeedback 总线的 Toast 与确认框
+  const { toasts, dismissToast, activeConfirm, resolveConfirm } = useAppFeedback();
 
   // 统一封装「激活会话 + 同步左侧 agent 选中态」，避免被动切换路径漏同步 selector
   const activateSession = useCallback((id: string) => {
@@ -414,6 +554,26 @@ function App() {
     };
   }, []);
 
+  // 按会话交互模式路由写入：GUI 聊天走 chat 发送事件，CLI 终端写 PTY
+  const writeToSessionTerminal = useCallback(async (
+    sessionId: string,
+    data: string,
+  ) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) throw new Error(`会话 ${sessionId} 不存在`);
+    const mode = interactionModeBySession[sessionId] ?? claudeInteractionMode;
+    if (shouldUseGuiChat(session.type, mode)) {
+      await new Promise<void>((resolve) => {
+        window.dispatchEvent(new CustomEvent("kkcoder-chat-send-queued", {
+          detail: { sessionId, prompt: data.trim() },
+        }));
+        setTimeout(resolve, 100);
+      });
+      return;
+    }
+    await invoke("write_to_terminal", { sessionId, data });
+  }, [claudeInteractionMode, interactionModeBySession, sessions]);
+
   const handleTriggerShortcut = (content: string) => {
     if (!activeSessionId) return;
     const isBusy = sessionBusy[activeSessionId] || false;
@@ -425,7 +585,7 @@ function App() {
       setQueues(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] || []), { id: generateUUID(), prompt: content }] }));
     } else {
       setSessionBusy(prev => ({ ...prev, [activeSessionId]: true }));
-      invoke("write_to_terminal", { sessionId: activeSessionId, data: content + "\r\n" })
+      writeToSessionTerminal(activeSessionId, content + "\r\n")
         .then(() => {
           handleUserSubmittedInputWithRenameReset(activeSessionId);
         })
@@ -515,6 +675,20 @@ function App() {
   const [showQueueModal, setShowQueueModal] = useState<boolean>(false);
   const [queueInput, setQueueInput] = useState<string>("");
   const [sessionBusy, setSessionBusy] = useState<Record<string, boolean>>({});
+
+  // 构建每个打开标签的运行时属性（是否 GUI 聊天、是否 Native 终端等）
+  const tabRuntimeBySession = useMemo(() => {
+    const map = new Map<string, { shouldResume: boolean; useGuiChat: boolean }>();
+    for (const session of sessions) {
+      if (!openTabIds.includes(session.id)) continue;
+      const mode = interactionModeBySession[session.id] ?? claudeInteractionMode;
+      map.set(session.id, {
+        shouldResume: shouldResumeSession(session.id, newSessionIds),
+        useGuiChat: shouldUseGuiChat(session.type, mode),
+      });
+    }
+    return map;
+  }, [sessions, openTabIds, newSessionIds, interactionModeBySession, claudeInteractionMode]);
 
   const handleUserSubmittedInput = (sessionId: string, submittedAt: string = new Date().toISOString()) => {
     localStorage.setItem(`agentdesk_session_has_dialogue_${sessionId}`, "true");
@@ -617,11 +791,11 @@ function App() {
     if (!activeSessionId) return;
     const trimmed = queueInput.trim();
     if (!trimmed) {
-      alert("请输入要排队执行的提示词！");
+      notifyWarning("请输入要排队执行的提示词！");
       return;
     }
     if (currentQueue.length >= 2) {
-      alert("队列已满！目前最多只允许队列中有 2 个排队任务。");
+      notifyWarning("队列已满！目前最多只允许队列中有 2 个排队任务。");
       return;
     }
     setQueues(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] || []), { id: generateUUID(), prompt: trimmed }] }));
@@ -641,20 +815,21 @@ function App() {
       // 立即在前端置为繁忙，防范异步重入和并发发送
       setSessionBusy(prev => ({ ...prev, [activeSessionId]: true }));
 
-      // 写入终端
-      invoke("write_to_terminal", { sessionId: activeSessionId, data: nextTask.prompt + "\r\n" })
+      // 按会话交互模式路由：GUI 聊天走 chat 事件，CLI 终端写 PTY
+      writeToSessionTerminal(activeSessionId, nextTask.prompt + "\r\n")
         .then(() => {
           handleUserSubmittedInputWithRenameReset(activeSessionId);
-          log(`[Queue] Successfully sent task to terminal. Removing from queue...`);
+          log(`[Queue] Successfully sent task to session. Removing from queue...`);
           setQueues(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] || []).slice(1) }));
         })
         .catch((err) => {
-          log(`[Queue] Failed to send queued task: ${err}`);
+          log(`[Queue] Failed to send queued task: ${formatFeedbackError(err)}`);
           // 发送失败恢复闲置状态
+          notifyWarning(`排队任务发送失败：${formatFeedbackError(err)}`);
           setSessionBusy(prev => ({ ...prev, [activeSessionId]: false }));
         });
     }
-  }, [queues, activeSessionId, sessionBusy]);
+  }, [queues, activeSessionId, sessionBusy, writeToSessionTerminal]);
 
   // 当队列长度或显示状态变化时，强力触发 resize 事件，确保 xterm.js 虚拟终端完美重测尺寸且不遮挡输入框
   useEffect(() => {
@@ -706,23 +881,32 @@ function App() {
     return `${base}${sep}${relativePath}`;
   }, [activeSession?.path]);
 
-  const insertConversationTagToActiveTerminal = useCallback((text: string) => {
+  // 插入对话事件同时以新旧两个通道派发：TerminalTab 仍监听 agentdesk-*，ChatTab 监听 kkcoder-*
+  const dispatchInsertConversationTag = useCallback((detail: {
+    sessionId: string;
+    text: string;
+    kind?: string;
+    sourcePath?: string;
+  }) => {
+    window.dispatchEvent(new CustomEvent("agentdesk-insert-conversation-tag", { detail }));
+    window.dispatchEvent(new CustomEvent("kkcoder-insert-conversation-tag", { detail }));
+  }, []);
+
+  const insertConversationTagToActiveTerminal = useCallback((text: string, kind?: string, sourcePath?: string) => {
     if (!activeSessionId || !text) return;
-    window.dispatchEvent(new CustomEvent("agentdesk-insert-conversation-tag", {
-      detail: {
-        sessionId: activeSessionId,
-        text,
-      },
-    }));
-  }, [activeSessionId]);
+    dispatchInsertConversationTag({
+      sessionId: activeSessionId,
+      text,
+      kind,
+      sourcePath,
+    });
+  }, [activeSessionId, dispatchInsertConversationTag]);
 
   // 文件拖拽到指定会话：将路径插入到目标会话的终端
   const handleInsertPathToSession = useCallback((sessionId: string, text: string) => {
     if (!sessionId || !text) return;
-    window.dispatchEvent(new CustomEvent("agentdesk-insert-conversation-tag", {
-      detail: { sessionId, text },
-    }));
-  }, []);
+    dispatchInsertConversationTag({ sessionId, text });
+  }, [dispatchInsertConversationTag]);
 
   // 切换会话项目路径时自动清空文件预览
   useEffect(() => {
@@ -2226,6 +2410,8 @@ function App() {
                   if (!isOpen) return null;
                   const isActive = activeSessionId === s.id;
                   const shouldResume = shouldResumeSession(s.id, newSessionIds);
+                  const runtime = tabRuntimeBySession.get(s.id);
+                  const useGuiChat = runtime?.useGuiChat ?? false;
                   return (
                     <div
                       key={s.id}
@@ -2238,27 +2424,64 @@ function App() {
                         position: "relative",
                       }}
                     >
-                      <TerminalTab
-                        sessionId={s.id}
-                        directory={s.path}
-                        agentType={s.type}
-                        agentSessionId={s.agentSessionId}
-                        isReopen={shouldResume}
-                        onSpawned={() => {
-                          log(`TerminalTab spawn resolved for session: ${s.id}. Removing from newSessionIds...`);
-                          setNewSessionIds((prev) => prev.filter((nid) => nid !== s.id));
-                        }}
-                        busy={sessionBusy[s.id] || false}
-                        onStateChange={(busy) => {
-                          setSessionBusy(prev => ({ ...prev, [s.id]: busy }));
-                        }}
-                        isActive={isActive}
-                        onCommandComplete={() => handleCommandComplete(s.id)}
-                        onUserSubmittedInput={handleUserSubmittedInputWithRenameReset}
-                        onRenameSession={handleRenameSession}
-                        onSessionBound={handleSessionBound}
-                      />
-                      {sessionBusy[s.id] && (
+                      {useGuiChat ? (
+                        <ChatTab
+                          sessionId={s.id}
+                          directory={s.path}
+                          agentSessionId={s.agentSessionId}
+                          isActive={isActive}
+                          selectedModel={selectedModel}
+                          modelInfo={modelInfo}
+                          onSelectModel={handleSelectModel}
+                          onSelectProvider={handleSelectProvider}
+                          onRefreshModelInfo={refreshModelInfo}
+                          onOpenRulesEditor={() => setShowMdEditor(true)}
+                          onSpawned={() => {
+                            log(`ChatTab spawn resolved for session: ${s.id}. Removing from newSessionIds...`);
+                            setNewSessionIds((prev) => prev.filter((nid) => nid !== s.id));
+                          }}
+                          onStateChange={(busy) => {
+                            setSessionBusy(prev => ({ ...prev, [s.id]: busy }));
+                          }}
+                          onCommandComplete={() => handleCommandComplete(s.id)}
+                          onUserSubmittedInput={handleUserSubmittedInputWithRenameReset}
+                          onEnqueuePrompt={(sessionId, prompt) => {
+                            setQueues(prev => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: generateUUID(), prompt }] }));
+                          }}
+                          queueTasks={s.id === activeSessionId ? currentQueue : []}
+                          onRemoveQueueTask={(sessionId, taskId) => {
+                            setQueues(prev => {
+                              const q = (prev[sessionId] || []).filter(t => t.id !== taskId);
+                              return { ...prev, [sessionId]: q };
+                            });
+                          }}
+                          onUpdateQueueTask={() => {}}
+                          onPauseQueue={() => {}}
+                          onResumeQueue={() => {}}
+                        />
+                      ) : (
+                        <TerminalTab
+                          sessionId={s.id}
+                          directory={s.path}
+                          agentType={s.type}
+                          agentSessionId={s.agentSessionId}
+                          isReopen={shouldResume}
+                          onSpawned={() => {
+                            log(`TerminalTab spawn resolved for session: ${s.id}. Removing from newSessionIds...`);
+                            setNewSessionIds((prev) => prev.filter((nid) => nid !== s.id));
+                          }}
+                          busy={sessionBusy[s.id] || false}
+                          onStateChange={(busy) => {
+                            setSessionBusy(prev => ({ ...prev, [s.id]: busy }));
+                          }}
+                          isActive={isActive}
+                          onCommandComplete={() => handleCommandComplete(s.id)}
+                          onUserSubmittedInput={handleUserSubmittedInputWithRenameReset}
+                          onRenameSession={handleRenameSession}
+                          onSessionBound={handleSessionBound}
+                        />
+                      )}
+                      {(sessionBusy[s.id] || (useGuiChat && sessionBusy[s.id])) && (
                         <div className="terminal-thinking-badge">
                           <span className="thinking-dot-pulse"></span>
                           <span className="thinking-text">AI 正在思考...</span>
@@ -3003,6 +3226,18 @@ function App() {
           </div>
         </div>
       )}
+    {/* 应用级 Toast + 通用确认框宿主（AppToastHost 底部轻抬栈 + ConfirmModal 模态确认） */}
+      <AppToastHost toasts={toasts} onDismiss={dismissToast} />
+      <ConfirmModal
+        show={activeConfirm != null}
+        title={activeConfirm?.title ?? ""}
+        message={activeConfirm?.message ?? ""}
+        confirmText={activeConfirm?.confirmText}
+        cancelText={activeConfirm?.cancelText}
+        isDanger={activeConfirm?.isDanger}
+        onConfirm={() => resolveConfirm(true)}
+        onCancel={() => resolveConfirm(false)}
+      />
     </div>
   );
 }

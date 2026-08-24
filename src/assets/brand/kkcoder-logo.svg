@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="KKCoder logo variant 3 Hex Badge">
+  <defs>
+    <linearGradient id="v3-plate" x1="80" y1="60" x2="430" y2="450" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#16161c"/>
+      <stop offset="100%" stop-color="#09090b"/>
+    </linearGradient>
+    <linearGradient id="v3-hex" x1="120" y1="90" x2="400" y2="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="50%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#c2410c"/>
+    </linearGradient>
+    <linearGradient id="v3-kk" x1="180" y1="160" x2="340" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <filter id="v3-soft" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#f97316" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="108" fill="url(#v3-plate)"/>
+  <!-- Hex shield -->
+  <g filter="url(#v3-soft)">
+    <path
+      d="M256 78
+         L402 158
+         V334
+         L256 414
+         L110 334
+         V158 Z"
+      fill="url(#v3-hex)"
+    />
+    <path
+      d="M256 104
+         L380 172
+         V320
+         L256 388
+         L132 320
+         V172 Z"
+      fill="#111114"
+      opacity="0.92"
+    />
+  </g>
+  <!-- Centered KK -->
+  <g fill="url(#v3-kk)">
+    <path d="M166 176h36v68l52-68h42l-62 78 66 98h-42l-54-82v82h-38V176z"/>
+    <path d="M292 176h36v68l52-68h42l-62 78 66 98h-42l-54-82v82h-38V176z"/>
+  </g>
+</svg>

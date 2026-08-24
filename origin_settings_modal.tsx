@@ -20,6 +20,8 @@ import {
   Sliders,
   Sparkles,
   TerminalSquare,
+  Wrench,
+  type LucideIcon,
 } from "lucide-react";
 
 const GitHubIcon: React.FC<{ size?: number; className?: string }> = ({ size = 14, className = "" }) => (
@@ -38,20 +40,8 @@ const GitHubIcon: React.FC<{ size?: number; className?: string }> = ({ size = 14
     />
   </svg>
 );
-
-/** 导航栏 Claude 品牌图标：ClaudeIcon 用 currentColor 会跟随文字色变灰，
- *  这里显式补上品牌橙（对齐原版设置页 <ClaudeIcon color="#D97757" />） */
-const ClaudeNavIcon: React.FC<{ size?: number }> = ({ size }) => (
-  <ClaudeIcon size={size} color="#D97757" />
-);
-
-/** 导航栏 Codex 品牌图标：补上品牌绿（对齐原版设置页 <CodexIcon color="var(--color-green)" />） */
-const CodexNavIcon: React.FC<{ size?: number }> = ({ size }) => (
-  <CodexIcon size={size} color="var(--color-green, #22c55e)" />
-);
 import { invoke } from "@tauri-apps/api/core";
 import { DirectoryPickerModal } from "./DirectoryPickerModal";
-import { ClaudeIcon, CodexIcon, CcSwitchIcon } from "./Sidebar";
 import {
   DEFAULT_SESSION_CLEANUP_DAYS,
   MIN_SESSION_CLEANUP_DAYS,
@@ -94,10 +84,6 @@ const LLM_API_KEY_KEY = "kkcoder_setting_llm_api_key";
 const LLM_MODEL_KEY = "kkcoder_setting_llm_model";
 const IDLE_MINUTES_KEY = "kkcoder_setting_idle_minutes";
 
-// CLI 工具 npm 包名
-const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
-const CODEX_NPM_PACKAGE = "@openai/codex";
-
 interface RenameResult {
   session_id: string;
   old_name: string;
@@ -108,10 +94,7 @@ interface RenameResult {
 
 type SettingsMenuId =
   | "basic"
-  | "claude"
-  | "codex"
   | "chat"
-  | "ccswitch"
   | "terminal"
   | "preview"
   | "notifications"
@@ -130,10 +113,7 @@ interface SettingsMenuEntry {
 
 const SETTINGS_MENU: SettingsMenuEntry[] = [
   { id: "basic", label: "常规外观", group: "基础设置", description: "主题配色、界面语言与窗口关闭行为" },
-  { id: "claude", label: "Claude Code", group: "基础设置", description: "Claude Code 安装版本、更新检测与安装命令" },
-  { id: "codex", label: "Codex", group: "基础设置", description: "Codex 安装版本、更新检测与安装命令" },
   { id: "chat", label: "GUI 界面", group: "基础设置", description: "GUI 聊天对话、命令记录与思考过程展示" },
-  { id: "ccswitch", label: "CC Switch", group: "基础设置", description: "CC Switch 助手配置切换器路径" },
   { id: "terminal", label: "CLI 终端", group: "基础设置", description: "终端字体、字号、配色、兼容模式与回滚缓冲" },
   { id: "preview", label: "文件预览", group: "基础设置", description: "右侧预览面板与 Monaco 代码编辑器字体与字号" },
   { id: "notifications", label: "通知音效", group: "基础设置", description: "AI 回答完成通知、提示音色与音量调节" },
@@ -146,13 +126,10 @@ const SETTINGS_MENU: SettingsMenuEntry[] = [
 
 const SETTINGS_GROUPS = ["基础设置", "管理", "其他"] as const;
 
-/** 左侧菜单项图标（align CC-GUI settings-nav 带图标样式；Claude/CC Switch 保留原始品牌图标） */
-const SETTINGS_NAV_ICONS: Record<SettingsMenuId, React.ElementType> = {
+/** 左侧菜单项图标（对齐 CC-GUI settings-nav 带图标样式） */
+const SETTINGS_NAV_ICONS: Record<SettingsMenuId, LucideIcon> = {
   basic: Palette,
-  claude: ClaudeNavIcon,
-  codex: CodexNavIcon,
   chat: MessageSquare,
-  ccswitch: CcSwitchIcon,
   terminal: TerminalSquare,
   preview: FileText,
   notifications: Bell,
@@ -169,135 +146,6 @@ interface SettingsModalProps {
   onSessionsRenamed?: () => void; // 修正完成后刷新会话列表
 }
 
-// ==================== CLI 工具设置面板 (Claude Code 原始版式) ====================
-
-interface CliToolPanelProps {
-  Icon: React.FC<{ size?: number; color?: string }>;
-  iconColor: string;
-  title: string;
-  packageName: string;
-  installedVersion: string;
-  onCheckLatest: () => Promise<{ latest: string; isLatest: boolean }>;
-}
-
-const CliToolPanel: React.FC<CliToolPanelProps> = ({
-  Icon,
-  iconColor,
-  title,
-  packageName,
-  installedVersion,
-  onCheckLatest,
-}) => {
-  const installCmd = `npm install -g ${packageName}`;
-  const updateCmd = `npm install -g ${packageName}@latest`;
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
-  const [checking, setChecking] = useState<boolean>(false);
-  const [latestResult, setLatestResult] = useState<{
-    latest: string;
-    isLatest: boolean;
-  } | null>(null);
-
-  const handleCopy = (cmd: string) => {
-    navigator.clipboard.writeText(cmd).then(() => {
-      setCopiedCmd(cmd);
-      setTimeout(() => setCopiedCmd(null), 1500);
-    }).catch(() => {});
-  };
-
-  const versionLabel = installedVersion && installedVersion !== title ? installedVersion : "未检测到（未安装）";
-  const versionMissing = !installedVersion || installedVersion === title;
-
-  const handleCheck = async (): Promise<void> => {
-    setChecking(true);
-    setLatestResult(null);
-    try {
-      const result = await onCheckLatest();
-      setLatestResult(result);
-    } catch (err) {
-      setLatestResult(null);
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  return (
-    <div className="settings-content">
-      {/* 标题与图标 */}
-      <div className="settings-group">
-        <div className="cli-tool-header">
-          <Icon size={28} color={iconColor} />
-          <div className="cli-tool-header-info">
-            <div className="cli-tool-title">{title}</div>
-            <div className={`cli-tool-version ${versionMissing ? "missing" : ""}`}>
-              {versionMissing && <span style={{ color: "var(--color-danger, #e5484d)" }}>● </span>}
-              {versionLabel}
-            </div>
-          </div>
-          <button
-            className="settings-toggle-btn"
-            onClick={handleCheck}
-            disabled={checking}
-            title="联网检测 npm 上的最新版本"
-          >
-            {checking ? "检测中..." : "检测版本更新"}
-          </button>
-        </div>
-      </div>
-
-      {/* 检测结果 */}
-      {latestResult && (
-        <div className="settings-group">
-          <div className="settings-group-label">版本更新检测</div>
-          <div className="cli-check-result">
-            {latestResult.isLatest ? (
-              <div className="cli-check-latest">
-                <span className="cli-check-icon">✓</span>
-                <span>当前已是最新版本</span>
-                <span className="cli-check-version">v{latestResult.latest}</span>
-              </div>
-            ) : (
-              <div className="cli-check-outdated">
-                <span className="cli-check-icon">⬆</span>
-                <div className="cli-check-info">
-                  <span>有新版本可用：<strong>v{latestResult.latest}</strong></span>
-                  <span className="cli-check-hint">请使用下方更新命令升级</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* npm 安装命令 */}
-      <div className="settings-group">
-        <div className="settings-group-label">安装命令</div>
-        <div className="cli-cmd-row">
-          <code className="cli-cmd">{installCmd}</code>
-          <button
-            className={`cli-copy-btn ${copiedCmd === installCmd ? "copied" : ""}`}
-            onClick={() => handleCopy(installCmd)}
-          >
-            {copiedCmd === installCmd ? "已复制" : "复制"}
-          </button>
-        </div>
-      </div>
-
-      {/* npm 更新命令 */}
-      <div className="settings-group">
-        <div className="settings-group-label">更新命令（安装最新版）</div>
-        <div className="cli-cmd-row">
-          <code className="cli-cmd">{updateCmd}</code>
-          <button
-            className={`cli-copy-btn ${copiedCmd === updateCmd ? "copied" : ""}`}
-            onClick={() => handleCopy(updateCmd)}
-          >
-            {copiedCmd === updateCmd ? "已复制" : "复制"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onSessionsRenamed }) => {
   const [activeMenu, setActiveMenu] = useState<SettingsMenuId>("basic");
@@ -393,76 +241,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   const [claudeInteractionMode, setClaudeInteractionMode] = useState<ClaudeInteractionMode>(() => {
     return resolveClaudeInteractionMode(localStorage.getItem(CLAUDE_INTERACTION_MODE_KEY));
   });
-
-  // --- Claude Code / Codex CLI 工具版本（原版 CLI 工具面板） ---
-  const [claudeInstalled, setClaudeInstalled] = useState<string>(() => {
-    return localStorage.getItem("agentdesk_cached_claude_version") || "";
-  });
-  const [codexInstalled, setCodexInstalled] = useState<string>(() => {
-    return localStorage.getItem("agentdesk_cached_codex_version") || "";
-  });
-
-  // 从 "Claude Code 2.1.206" 提取纯版本号 "2.1.206"
-  const extractVersionNumber = (ver: string): string => {
-    const match = ver.match(/(\d+\.\d+\.\d+)/);
-    return match ? match[1] : ver.replace(/^[^\d]*/, "").trim();
-  };
-
-  // 刷新本地已安装版本
-  const refreshClaudeInstalled = () => {
-    invoke<string>("get_claude_version")
-      .then((ver) => {
-        setClaudeInstalled(ver);
-        localStorage.setItem("agentdesk_cached_claude_version", ver);
-        window.dispatchEvent(new CustomEvent("agentdesk-claude-version-change", { detail: ver }));
-      })
-      .catch(() => {});
-  };
-  const refreshCodexInstalled = () => {
-    invoke<string>("get_codex_version")
-      .then((ver) => {
-        const normalized = (() => {
-          const trimmed = ver.trim();
-          const m = trimmed.match(/^codex[-_]?(cli|client)?\s*[:\-]?\s*(.*)$/i);
-          if (m) {
-            const version = (m[2] || "").trim();
-            return version ? `Codex ${version}` : "Codex";
-          }
-          return trimmed ? `Codex ${trimmed}` : "Codex";
-        })();
-        setCodexInstalled(normalized);
-        localStorage.setItem("agentdesk_cached_codex_version", normalized);
-        window.dispatchEvent(new CustomEvent("agentdesk-codex-version-change", { detail: normalized }));
-      })
-      .catch(() => {});
-  };
-
-  // 检测 Claude Code 最新版本（返回 npm 最新版号 + 是否与本地一致）
-  const checkClaudeLatest = async (): Promise<{ latest: string; isLatest: boolean }> => {
-    const latest = await invoke<string>("get_claude_latest_version");
-    // 同步刷新本地版本显示
-    refreshClaudeInstalled();
-    const latestNum = latest.trim();
-    const installedNum = extractVersionNumber(claudeInstalled);
-    const isLatest = installedNum === latestNum;
-    return { latest: latestNum, isLatest };
-  };
-
-  // 检测 Codex 最新版本
-  const checkCodexLatest = async (): Promise<{ latest: string; isLatest: boolean }> => {
-    const latest = await invoke<string>("get_codex_latest_version");
-    refreshCodexInstalled();
-    const latestNum = latest.trim();
-    const installedNum = extractVersionNumber(codexInstalled);
-    const isLatest = installedNum === latestNum;
-    return { latest: latestNum, isLatest };
-  };
-
-  useEffect(() => {
-    refreshClaudeInstalled();
-    refreshCodexInstalled();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show]);
   // 命令记录自动折叠（GUI 聊天多条命令时折叠为一行摘要）
   const COLLAPSE_TOOLS_KEY = "kkcoder_setting_collapse_tool_cards";
   const [collapseToolCards, setCollapseToolCards] = useState<boolean>(() => {
@@ -599,11 +377,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   // --- 2. 写入各项设置至 localStorage ---
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
-    // 兼容旧组件（App 侧栏 / TerminalTab 启动读 agentdesk_setting_theme）
-    localStorage.setItem("agentdesk_setting_theme", theme);
     applyTheme(theme);
     window.dispatchEvent(new CustomEvent("kkcoder-theme-change", { detail: theme }));
-    window.dispatchEvent(new CustomEvent("agentdesk-theme-change", { detail: theme }));
     log(`[settings] theme -> ${theme}`);
   }, [theme]);
 
@@ -626,41 +401,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_notify_on_complete", String(notifyOnComplete));
-    localStorage.setItem("agentdesk_setting_notify_on_complete", String(notifyOnComplete));
   }, [notifyOnComplete]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_notify_threshold", String(notifyThreshold));
-    localStorage.setItem("agentdesk_setting_notify_threshold", String(notifyThreshold));
   }, [notifyThreshold]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_play_sound", String(playSound));
-    localStorage.setItem("agentdesk_setting_play_sound", String(playSound));
   }, [playSound]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_sound_tone", soundTone);
-    localStorage.setItem("agentdesk_setting_sound_tone", soundTone);
   }, [soundTone]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_sound_volume", String(soundVolume));
-    localStorage.setItem("agentdesk_setting_sound_volume", String(soundVolume));
   }, [soundVolume]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_font_family", fontFamily);
-    localStorage.setItem("agentdesk_setting_font_family", fontFamily);
     window.dispatchEvent(new CustomEvent("kkcoder-font-change", { detail: fontFamily }));
-    window.dispatchEvent(new CustomEvent("agentdesk-font-change", { detail: fontFamily }));
   }, [fontFamily]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_font_size", String(fontSize));
-    localStorage.setItem("agentdesk_setting_font_size", String(fontSize));
     window.dispatchEvent(new CustomEvent("kkcoder-font-size-change", { detail: fontSize }));
-    window.dispatchEvent(new CustomEvent("agentdesk-font-size-change", { detail: fontSize }));
   }, [fontSize]);
 
   useEffect(() => {
@@ -679,7 +445,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   useEffect(() => {
     localStorage.setItem("kkcoder_setting_scrollback", String(scrollback));
-    localStorage.setItem("agentdesk_setting_scrollback", String(scrollback));
   }, [scrollback]);
 
   useEffect(() => {
@@ -795,16 +560,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   useEffect(() => {
     localStorage.setItem("kkcoder_shortcuts_enabled", String(shortcutsEnabled));
-    localStorage.setItem("agentdesk_shortcuts_enabled", String(shortcutsEnabled));
     window.dispatchEvent(new Event("kkcoder-shortcuts-change"));
-    window.dispatchEvent(new Event("agentdesk-shortcuts-change"));
   }, [shortcutsEnabled]);
 
   useEffect(() => {
     localStorage.setItem("kkcoder_shortcuts_list", JSON.stringify(shortcutsList));
-    localStorage.setItem("agentdesk_shortcuts_list", JSON.stringify(shortcutsList));
     window.dispatchEvent(new Event("kkcoder-shortcuts-change"));
-    window.dispatchEvent(new Event("agentdesk-shortcuts-change"));
   }, [shortcutsList]);
 
   useEffect(() => {
@@ -1061,30 +822,6 @@ return (
               </div>
             )}
 
-            {activeMenu === "claude" && (
-              <CliToolPanel
-                key="claude"
-                Icon={ClaudeIcon}
-                iconColor="#D97757"
-                title="Claude Code"
-                packageName={CLAUDE_NPM_PACKAGE}
-                installedVersion={claudeInstalled}
-                onCheckLatest={checkClaudeLatest}
-              />
-            )}
-
-            {activeMenu === "codex" && (
-              <CliToolPanel
-                key="codex"
-                Icon={CodexIcon}
-                iconColor="var(--color-green, #22c55e)"
-                title="Codex"
-                packageName={CODEX_NPM_PACKAGE}
-                installedVersion={codexInstalled}
-                onCheckLatest={checkCodexLatest}
-              />
-            )}
-
             {activeMenu === "chat" && (
               <div className="settings-content settings-basic-surface">
                 <div className="settings-pref-group">
@@ -1171,82 +908,6 @@ return (
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {activeMenu === "ccswitch" && (
-              <div className="settings-content">
-                <div className="settings-group">
-                  <div className="cli-tool-header">
-                    <CcSwitchIcon size={28} />
-                    <div className="cli-tool-header-info">
-                      <div className="cli-tool-title">CC Switch</div>
-                      <div className="cli-tool-version">
-                        {ccswitchPath ? ccswitchPath : "未配置路径"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="settings-group">
-                  <div className="settings-group-label">可执行文件路径</div>
-                  <div style={{ display: "flex", gap: "8px", width: "100%" }}>
-                    <input
-                      type="text"
-                      placeholder="例如: C:\Program Files\ccswitch\ccswitch.exe"
-                      value={ccswitchPath}
-                      onChange={(e) => setCcswitchPath(e.target.value)}
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: "var(--bg-input)",
-                        color: "var(--text-primary)",
-                        fontSize: "13px",
-                        outline: "none",
-                        transition: "border-color var(--transition-smooth)",
-                      }}
-                      onFocus={(e) => {
-                        e.target.style.borderColor = "var(--color-primary)";
-                      }}
-                      onBlurCapture={(e) => {
-                        e.target.style.borderColor = "var(--border-color)";
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowFilePicker(true)}
-                      style={{
-                        padding: "6px 12px",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: "var(--bg-hover-item)",
-                        color: "var(--text-primary)",
-                        fontSize: "12px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      浏览...
-                    </button>
-                  </div>
-                </div>
-                <div className="settings-group">
-                  <button
-                    className="settings-toggle-btn"
-                    onClick={() => {
-                      const path = ccswitchPath.trim();
-                      if (!path) {
-                        alert("请先在「CC Switch」中配置 ccswitch.exe 的路径。");
-                        return;
-                      }
-                      invoke("launch_ccswitch", { path }).catch((err) => {
-                        alert(`启动 ccswitch.exe 失败:\n${err}`);
-                      });
-                    }}
-                  >
-                    打开 CC Switch
-                  </button>
                 </div>
               </div>
             )}
@@ -1646,6 +1307,35 @@ return (
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                <div className="settings-pref-group">
+                  <div className="settings-pref-card-label">
+                    <Wrench size={12} aria-hidden />
+                    <span>外部工具</span>
+                  </div>
+                  <div className="settings-pref-card">
+                    <div className="settings-pref-row">
+                      <div className="settings-pref-meta">
+                        <div className="settings-pref-title">ccswitch 路径</div>
+                        <div className="settings-pref-desc">标题栏快捷启动 ccswitch 助手配置切换器</div>
+                      </div>
+                      <div className="settings-pref-control settings-pref-control--stretch">
+                        <div className="settings-pref-path">
+                          <input
+                            type="text"
+                            className="settings-text-input"
+                            placeholder="例如: C:\Program Files\ccswitch\ccswitch.exe"
+                            value={ccswitchPath}
+                            onChange={(e) => setCcswitchPath(e.target.value)}
+                          />
+                          <button type="button" className="settings-pref-btn" onClick={() => setShowFilePicker(true)}>
+                            浏览
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
