@@ -81,7 +81,7 @@ import {
   type TerminalSchemeMode,
 } from "../utils/terminalScheme";
 import { applyTheme, DEFAULT_THEME, THEME_STORAGE_KEY, THEME_DEFINITIONS } from "../utils/theme";
-import kkcoderIcon from "../assets/brand/kkcoder-icon.png";
+import agentdeskIcon from "../assets/brand/agentdesk-icon.png";
 import { log, isDebugLogEnabled, DEBUG_LOG_KEY } from "../utils/log";
 import { notifyError, notifySuccess, formatFeedbackError } from "../utils/appFeedback";
 
@@ -1837,7 +1837,7 @@ return (
                   <div className="about-hero-card">
                     <div className="about-hero-glow" />
                     <div className="about-logo-wrapper">
-                      <img className="about-logo" src={kkcoderIcon} alt="KKCoder" draggable={false} />
+                      <img className="about-logo" src={agentdeskIcon} alt="KKCoder" draggable={false} />
                     </div>
                     <div className="about-title-row">
                       <div className="about-title">KKCoder AI 终端管理器</div>

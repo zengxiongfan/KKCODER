@@ -14,7 +14,7 @@ import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { FileEditor, type FileEditorHandle } from "./components/FileEditor";
 import { FileText, Folder, GitBranch, GitCommit } from "lucide-react";
-import kkcoderIcon from "./assets/brand/kkcoder-icon.png";
+import agentdeskIcon from "./assets/brand/agentdesk-icon.png";
 import { AppToastHost } from "./components/AppToastHost";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { useAppFeedback, useSessionQueueEngine } from "./hooks";
@@ -2029,7 +2029,7 @@ function App() {
           {/* 窗口左上角徽标：与 exe / 任务栏图标一致的 icon.ico 图案 */}
           <img
             className="titlebar-logo-icon"
-            src={kkcoderIcon}
+            src={agentdeskIcon}
             alt=""
             draggable={false}
           />
