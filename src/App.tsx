@@ -14,9 +14,11 @@ import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { FileEditor, type FileEditorHandle } from "./components/FileEditor";
 import { FileText, Folder, GitBranch, GitCommit } from "lucide-react";
+import kkcoderIcon from "./assets/brand/kkcoder-icon.png";
 import { AppToastHost } from "./components/AppToastHost";
 import { ConfirmModal } from "./components/ConfirmModal";
-import { useAppFeedback } from "./hooks";
+import { useAppFeedback, useSessionQueueEngine } from "./hooks";
+import { getSessionQueue, MAX_SESSION_QUEUE_SIZE } from "./utils/sessionQueue";
 import { notifyWarning, formatFeedbackError } from "./utils/appFeedback";
 import {
   addUnreadCompletion,
@@ -290,7 +292,6 @@ function App() {
   const [prefilledProjectPath, setPrefilledProjectPath] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showMdEditor, setShowMdEditor] = useState<boolean>(false);
-  const [searchQuery, setSearchQuery] = useState<string>("");
   const [newSessionIds, setNewSessionIds] = useState<string[]>([]);
 
   // 会话历史面板状态
@@ -578,14 +579,14 @@ function App() {
     if (!activeSessionId) return;
     const isBusy = sessionBusy[activeSessionId] || false;
     if (isBusy) {
-      if (currentQueue.length >= 2) {
-        alert("队列已满！目前最多只允许队列中有 2 个排队任务。");
+      if (getSessionQueue(queueBySession, activeSessionId).length >= MAX_SESSION_QUEUE_SIZE) {
+        notifyWarning(`队列已满（${MAX_SESSION_QUEUE_SIZE}/${MAX_SESSION_QUEUE_SIZE}），请先清空或等待执行`);
         return;
       }
-      setQueues(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] || []), { id: generateUUID(), prompt: content }] }));
+      enqueuePrompt(activeSessionId, content);
     } else {
       setSessionBusy(prev => ({ ...prev, [activeSessionId]: true }));
-      writeToSessionTerminal(activeSessionId, content + "\r\n")
+      dispatchQueueTask(activeSessionId, content)
         .then(() => {
           handleUserSubmittedInputWithRenameReset(activeSessionId);
         })
@@ -665,16 +666,29 @@ function App() {
     }
   };
 
-  // 📋 任务队列状态与自动调度引擎
-  interface QueueTask {
-    id: string;
-    prompt: string;
-  }
-  const [queues, setQueues] = useState<Record<string, QueueTask[]>>({});
-  const currentQueue = activeSessionId ? (queues[activeSessionId] || []) : [];
-  const [showQueueModal, setShowQueueModal] = useState<boolean>(false);
-  const [queueInput, setQueueInput] = useState<string>("");
-  const [sessionBusy, setSessionBusy] = useState<Record<string, boolean>>({});
+  // 队列任务投递：按会话交互模式路由——GUI 聊天走 chat 发送事件，CLI 终端写 PTY。
+  // GUI 路径延迟 400ms：等后端 turn 收尾（turns map 清理）完成，避免「正在生成中」拒绝；
+  // 若仍失败，ChatTab 侧会静默重试。
+  const dispatchQueueTask = useCallback(
+    (sessionId: string, prompt: string) => {
+      const session = sessions.find((s: Session) => s.id === sessionId);
+      const mode = interactionModeBySession[sessionId] ?? claudeInteractionMode;
+      const useGuiChat = !!session && shouldUseGuiChat(session.type, mode);
+      if (useGuiChat) {
+        log(`[Queue] Dispatching queued task to GUI chat session ${sessionId}: "${prompt}"`);
+        window.setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent("kkcoder-chat-send-queued", {
+              detail: { sessionId, prompt },
+            }),
+          );
+        }, 400);
+        return Promise.resolve();
+      }
+      return writeToSessionTerminal(sessionId, `${prompt}\r\n`);
+    },
+    [interactionModeBySession, claudeInteractionMode, sessions, writeToSessionTerminal],
+  );
 
   // 构建每个打开标签的运行时属性（是否 GUI 聊天、是否 Native 终端等）
   const tabRuntimeBySession = useMemo(() => {
@@ -787,49 +801,31 @@ function App() {
     handleUserSubmittedInput(sessionId, submittedAt);
   };
 
-  const handleAddToQueue = () => {
-    if (!activeSessionId) return;
-    const trimmed = queueInput.trim();
-    if (!trimmed) {
-      notifyWarning("请输入要排队执行的提示词！");
-      return;
-    }
-    if (currentQueue.length >= 2) {
-      notifyWarning("队列已满！目前最多只允许队列中有 2 个排队任务。");
-      return;
-    }
-    setQueues(prev => ({ ...prev, [activeSessionId]: [...(prev[activeSessionId] || []), { id: generateUUID(), prompt: trimmed }] }));
-    setQueueInput("");
-    setShowQueueModal(false);
-  };
-
-  // 队列自动调度引擎
-  useEffect(() => {
-    if (!activeSessionId) return;
-    const isActiveBusy = sessionBusy[activeSessionId] || false;
-    if (!isActiveBusy && currentQueue.length > 0) {
-      // 弹出并执行下一个排队任务
-      const nextTask = currentQueue[0];
-      log(`[Queue] Auto-triggering queued task: "${nextTask.prompt}" for session: ${activeSessionId}`);
-
-      // 立即在前端置为繁忙，防范异步重入和并发发送
-      setSessionBusy(prev => ({ ...prev, [activeSessionId]: true }));
-
-      // 按会话交互模式路由：GUI 聊天走 chat 事件，CLI 终端写 PTY
-      writeToSessionTerminal(activeSessionId, nextTask.prompt + "\r\n")
-        .then(() => {
-          handleUserSubmittedInputWithRenameReset(activeSessionId);
-          log(`[Queue] Successfully sent task to session. Removing from queue...`);
-          setQueues(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] || []).slice(1) }));
-        })
-        .catch((err) => {
-          log(`[Queue] Failed to send queued task: ${formatFeedbackError(err)}`);
-          // 发送失败恢复闲置状态
-          notifyWarning(`排队任务发送失败：${formatFeedbackError(err)}`);
-          setSessionBusy(prev => ({ ...prev, [activeSessionId]: false }));
-        });
-    }
-  }, [queues, activeSessionId, sessionBusy, writeToSessionTerminal]);
+  // 会话任务队列引擎（上限 10/暂停恢复/逐条编辑删除，自动调度投递）
+  const {
+    queueBySession,
+    showQueueModal,
+    setShowQueueModal,
+    queueInput,
+    setQueueInput,
+    setQueueTargetSessionId,
+    sessionBusy,
+    setSessionBusy,
+    activeQueue,
+    queueModalQueue,
+    handleAddToQueue,
+    enqueuePrompt,
+    clearQueueForSession,
+    removeQueuedTask,
+    updateQueuedTask,
+    pauseSessionQueue,
+    resumeSessionQueue,
+  } = useSessionQueueEngine({
+    activeSessionId,
+    openTabIds,
+    dispatchTask: dispatchQueueTask,
+    onTaskSubmitted: handleUserSubmittedInputWithRenameReset,
+  });
 
   // 当队列长度或显示状态变化时，强力触发 resize 事件，确保 xterm.js 虚拟终端完美重测尺寸且不遮挡输入框
   useEffect(() => {
@@ -837,7 +833,7 @@ function App() {
       window.dispatchEvent(new Event("resize"));
     }, 80); // 80ms 确保 DOM 树重排与 CSS 动画过渡彻底完成
     return () => clearTimeout(timer);
-  }, [currentQueue.length]);
+  }, [activeQueue.length]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
@@ -1176,19 +1172,6 @@ function App() {
     const handleCloseTabContextMenu = () => setTabContextMenu(null);
     window.addEventListener("close-tab-context-menu", handleCloseTabContextMenu);
     return () => window.removeEventListener("close-tab-context-menu", handleCloseTabContextMenu);
-  }, []);
-
-  // 监听归档还原事件，重新加载所有会话
-  useEffect(() => {
-    const handleArchiveRestored = () => {
-      invoke<Session[]>("get_sessions")
-        .then((data) => {
-          setSessions(data || []);
-        })
-        .catch((err) => console.error("Failed to reload sessions after archive restore:", err));
-    };
-    window.addEventListener("archive-sessions-restored", handleArchiveRestored);
-    return () => window.removeEventListener("archive-sessions-restored", handleArchiveRestored);
   }, []);
 
   // 🚫 全局彻底拦截并禁用系统默认右键菜单，彻底实现无菜单点击无反应
@@ -2043,10 +2026,13 @@ function App() {
         onMouseDown={handleTitlebarMouseDown}
       >
         <div className="titlebar-logo">
-          {/* 🍊 高档黑橙 KK 矢量徽标 */}
-          <div className="titlebar-logo-icon">
-            KK
-          </div>
+          {/* 窗口左上角徽标：与 exe / 任务栏图标一致的 icon.ico 图案 */}
+          <img
+            className="titlebar-logo-icon"
+            src={kkcoderIcon}
+            alt=""
+            draggable={false}
+          />
           <span className="logo-title-text">AgentDesk 极简 AI 终端管理器</span>
         </div>
 
@@ -2241,8 +2227,6 @@ function App() {
           sessions={sessions}
           activeSessionId={activeSessionId}
           onSelectSession={handleSelectSession}
-          searchQuery={searchQuery}
-          onSearchQueryChange={setSearchQuery}
           onDeleteSession={handleDeleteSession}
           openTabIds={openTabIds}
           onRenameSession={handleRenameSession}
@@ -2445,19 +2429,12 @@ function App() {
                           }}
                           onCommandComplete={() => handleCommandComplete(s.id)}
                           onUserSubmittedInput={handleUserSubmittedInputWithRenameReset}
-                          onEnqueuePrompt={(sessionId, prompt) => {
-                            setQueues(prev => ({ ...prev, [sessionId]: [...(prev[sessionId] || []), { id: generateUUID(), prompt }] }));
-                          }}
-                          queueTasks={s.id === activeSessionId ? currentQueue : []}
-                          onRemoveQueueTask={(sessionId, taskId) => {
-                            setQueues(prev => {
-                              const q = (prev[sessionId] || []).filter(t => t.id !== taskId);
-                              return { ...prev, [sessionId]: q };
-                            });
-                          }}
-                          onUpdateQueueTask={() => {}}
-                          onPauseQueue={() => {}}
-                          onResumeQueue={() => {}}
+                          onEnqueuePrompt={enqueuePrompt}
+                          queueTasks={s.id === activeSessionId ? activeQueue : []}
+                          onRemoveQueueTask={removeQueuedTask}
+                          onUpdateQueueTask={updateQueuedTask}
+                          onPauseQueue={pauseSessionQueue}
+                          onResumeQueue={resumeSessionQueue}
                         />
                       ) : (
                         <TerminalTab
@@ -2589,7 +2566,7 @@ function App() {
           </div>
 
           {/* 新增的队列列表面板 */}
-          {currentQueue.length > 0 && activeSessionId && (
+          {activeQueue.length > 0 && activeSessionId && (
             <div className="queue-list-panel">
               <div className="queue-panel-header">
                 <div className="queue-panel-title">
@@ -2601,11 +2578,11 @@ function App() {
                     <line x1="3" y1="12" x2="3.01" y2="12"></line>
                     <line x1="3" y1="18" x2="3.01" y2="18"></line>
                   </svg>
-                  <span>任务队列 ({currentQueue.length})</span>
+                  <span>任务队列 ({activeQueue.length}/{MAX_SESSION_QUEUE_SIZE})</span>
                 </div>
                 <button
                   className="queue-clear-btn"
-                  onClick={() => setQueues(prev => ({ ...prev, [activeSessionId]: [] }))}
+                  onClick={() => clearQueueForSession(activeSessionId)}
                   title="全部清空队列"
                 >
                   <svg className="trash-svg-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2617,13 +2594,13 @@ function App() {
                 </button>
               </div>
               <div className="queue-panel-body">
-                {currentQueue.map((task, index) => (
+                {activeQueue.map((task, index) => (
                   <div key={task.id} className="queue-item">
                     <span className="queue-item-index">{index + 1}</span>
                     <span className="queue-item-text">{task.prompt}</span>
                     <button
                       className="queue-item-delete"
-                      onClick={() => setQueues(prev => ({ ...prev, [activeSessionId]: (prev[activeSessionId] || []).filter(t => t.id !== task.id) }))}
+                      onClick={() => removeQueuedTask(activeSessionId, task.id)}
                       title="删除排队任务"
                     >
                       ✕
@@ -2689,6 +2666,7 @@ function App() {
                 <button
                   className="queue-status-btn"
                   onClick={() => {
+                    setQueueTargetSessionId(activeSessionId);
                     setQueueInput("");
                     setShowQueueModal(true);
                   }}
@@ -2703,8 +2681,8 @@ function App() {
                     <line x1="3" y1="18" x2="3.01" y2="18"></line>
                   </svg>
                   <span>队列</span>
-                  {currentQueue.length > 0 && (
-                    <span className="queue-badge">{currentQueue.length}</span>
+                  {activeQueue.length > 0 && (
+                    <span className="queue-badge">{activeQueue.length}</span>
                   )}
                 </button>
 
@@ -2973,7 +2951,7 @@ function App() {
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--text-secondary)", fontSize: "11.5px" }}>
                 <span>Enter 添加到队列 · Shift+Enter 换行 · Esc 取消</span>
-                <span>当前队列: {currentQueue.length}/2</span>
+                <span>当前队列: {queueModalQueue.length}/{MAX_SESSION_QUEUE_SIZE}</span>
               </div>
             </div>
             <div className="modal-footer" style={{ marginTop: "10px" }}>

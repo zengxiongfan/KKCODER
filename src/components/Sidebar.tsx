@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ConfirmModal } from "./ConfirmModal";
+import { SearchPalette } from "./SearchPalette";
 import {
   formatRelativeSessionActivityTime,
   sortSessionsByActivityDesc,
@@ -52,15 +53,6 @@ export interface Session {
   matchSnippets?: string[]; // 搜索高亮的聊天记录匹配片段 (最多 3 条)
 }
 
-export interface ArchivedProject {
-  id: number;
-  project_name: string;
-  project_path: string;
-  archived_at: string;
-  archive_month: string;
-  sessions_data: string; // JSON string of sessions
-}
-
 interface SidebarProps {
   selectedAgent: "claude" | "codex";
   onSelectAgent: (agent: "claude" | "codex") => void;
@@ -70,8 +62,6 @@ interface SidebarProps {
   sessions: Session[];
   activeSessionId: string;
   onSelectSession: (id: string) => void;
-  searchQuery: string;
-  onSearchQueryChange: (query: string) => void;
   onDeleteSession: (e: React.MouseEvent | null, id: string) => void;
   openTabIds: string[]; // 用于判断该终端是否“加载到了右边”并点亮绿灯
   onRenameSession?: (id: string, newName: string) => void;
@@ -96,8 +86,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   sessions,
   activeSessionId,
   onSelectSession,
-  searchQuery,
-  onSearchQueryChange,
   onDeleteSession,
   openTabIds,
   onRenameSession,
@@ -159,119 +147,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     localStorage.setItem("agentdesk_project_last_accessed", JSON.stringify(projectLastAccessed));
   }, [projectLastAccessed]);
 
-  // 归档区状态
-  const [showArchive, setShowArchive] = useState<boolean>(false);
-  const [archivedProjects, setArchivedProjects] = useState<ArchivedProject[]>([]);
-  const [archiveContextMenu, setArchiveContextMenu] = useState<{
-    x: number;
-    y: number;
-    project: ArchivedProject;
-  } | null>(null);
-  const archiveSectionRef = useRef<HTMLDivElement>(null);
-
-  // 点击归档区外部时自动收起归档区
-  useEffect(() => {
-    if (!showArchive) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (archiveSectionRef.current && !archiveSectionRef.current.contains(e.target as Node)) {
-        setShowArchive(false);
-      }
-    };
-    // 延迟添加监听，避免当前点击事件立即触发
-    const timer = setTimeout(() => {
-      window.addEventListener("mousedown", handleClickOutside);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [showArchive]);
-
-  // 增加全局内容搜索相关的状态与防抖请求
-  const [isContentSearch, setIsContentSearch] = useState<boolean>(false);
-  const [contentSearchResults, setContentSearchResults] = useState<Record<string, string[]>>({});
-  const [hoveredSession, setHoveredSession] = useState<{
-    session: Session;
-    top: number;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!isContentSearch || !searchQuery.trim()) {
-      setContentSearchResults({});
-      return;
-    }
-
-    const delayDebounceFn = setTimeout(() => {
-      invoke<Array<{ sessionId: string; snippets: string[] }>>("search_session_contents", {
-        query: searchQuery,
-      })
-        .then((results) => {
-          const map: Record<string, string[]> = {};
-          if (results) {
-            results.forEach((r) => {
-              map[r.sessionId] = r.snippets;
-            });
-          }
-          setContentSearchResults(map);
-        })
-        .catch((err) => {
-          console.error("Content search failed:", err);
-        });
-    }, 250); // 250ms 防抖
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, isContentSearch]);
-
-  // 加载归档项目列表
-  const loadArchivedProjects = async () => {
-    try {
-      const data = await invoke<ArchivedProject[]>("get_archived_projects");
-      setArchivedProjects(data);
-    } catch (err) {
-      console.error("Failed to load archived projects:", err);
-    }
-  };
-
-  useEffect(() => {
-    loadArchivedProjects();
-  }, []);
-
-  // 归档项目
-  const handleArchiveProject = async (projectName: string, projectPath: string) => {
-    try {
-      // 收集该项目下的所有会话数据用于归档保存
-      const projectSessions = sessions.filter(s => s.project === projectName);
-      const sessionsJson = JSON.stringify(projectSessions);
-      await invoke("archive_project", { projectName, projectPath, sessionsJson });
-      // 删除该项目下的所有会话
-      const sessionIds = projectSessions.map(s => s.id);
-      if (sessionIds.length > 0) {
-        onDeleteSessionsBatch(sessionIds);
-      }
-      loadArchivedProjects();
-    } catch (err) {
-      alert(`归档项目失败: ${err}`);
-    }
-  };
-
-  // 还原归档项目
-  const handleRestoreArchivedProject = async (id: number) => {
-    try {
-      const sessionsJson: string = await invoke("restore_archived_project", { id });
-      // 解析归档时保存的会话数据并重建会话
-      const archivedSessions: Session[] = JSON.parse(sessionsJson || "[]");
-      for (const session of archivedSessions) {
-        await invoke("add_session", { session: { ...session, deleted: 0, deletedAt: null } });
-      }
-      loadArchivedProjects();
-      // 通知父组件重新加载会话列表
-      if (archivedSessions.length > 0) {
-        window.dispatchEvent(new CustomEvent("archive-sessions-restored"));
-      }
-    } catch (err) {
-      alert(`还原项目失败: ${err}`);
-    }
-  };
+  // 会话搜索面板（底部搜索框点击唤起）
+  const [searchPaletteOpen, setSearchPaletteOpen] = useState<boolean>(false);
 
   // 当 highlightSessionId 发生变化时，确保它隶属的项目文件夹处于展开状态
   useEffect(() => {
@@ -481,26 +358,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredSessions = sessions.filter((s) => s.type === selectedAgent && s.deleted !== 1 && !s.isTemp);
 
   filteredSessions.forEach((s) => {
-    const matchesTitle = searchQuery ? (
-      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      s.path.toLowerCase().includes(searchQuery.toLowerCase())
-    ) : true;
-
-    const matchedContentSnippets = isContentSearch ? contentSearchResults[s.id] : undefined;
-    const matchesContent = !!matchedContentSnippets && matchedContentSnippets.length > 0;
-
-    const isMatched = !searchQuery || matchesTitle || matchesContent;
-
-    if (isMatched) {
-      if (!projectsMap[s.project]) {
-        projectsMap[s.project] = { path: s.path, sessions: [] };
-      }
-      const sessionWithSnippet = (matchedContentSnippets && matchedContentSnippets.length > 0)
-        ? { ...s, matchSnippets: matchedContentSnippets } 
-        : s;
-      projectsMap[s.project].sessions.push(sessionWithSnippet);
+    if (!projectsMap[s.project]) {
+      projectsMap[s.project] = { path: s.path, sessions: [] };
     }
+    projectsMap[s.project].sessions.push(s);
   });
 
   Object.values(projectsMap).forEach((project) => {
@@ -515,25 +376,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   });
 
-  // 提取收藏的会话并附加匹配片段
+  // 提取收藏的会话
   const favoriteSessions = sortSessionsByActivityDesc(
-    filteredSessions
-      .filter((s) => s.favorite === 1)
-      .filter((s) => {
-        const matchesTitle = searchQuery ? (
-          s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.project.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.path.toLowerCase().includes(searchQuery.toLowerCase())
-        ) : true;
-        const matchedContentSnippets = isContentSearch ? contentSearchResults[s.id] : undefined;
-        return !searchQuery || matchesTitle || (!!matchedContentSnippets && matchedContentSnippets.length > 0);
-      })
-      .map((s) => {
-        const matchedContentSnippets = isContentSearch ? contentSearchResults[s.id] : undefined;
-        return (matchedContentSnippets && matchedContentSnippets.length > 0) 
-          ? { ...s, matchSnippets: matchedContentSnippets } 
-          : s;
-      })
+    filteredSessions.filter((s) => s.favorite === 1)
   );
 
   // 打开会话时，更新该项目的最后访问时间（用于置顶排序）
@@ -633,18 +478,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onHighlightEnd();
           }
         }}
-        onMouseEnter={(e) => {
-          if (isContentSearch && searchQuery && session.matchSnippets && session.matchSnippets.length > 0) {
-            const rect = e.currentTarget.getBoundingClientRect();
-            setHoveredSession({
-              session,
-              top: rect.top,
-            });
-          }
-        }}
-        onMouseLeave={() => {
-          setHoveredSession(null);
-        }}
       >
         <div className="session-content">
           {/* 状态指示器：回答完成且非活动时展示黄色点提醒，否则：加载到右侧点亮(亮绿)，休眠状态(淡灰绿) */}
@@ -683,24 +516,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 {session.name}
               </span>
-              {isContentSearch && searchQuery && session.matchSnippets && session.matchSnippets.length > 0 && (
-                <span 
-                  className="session-match-snippet"
-                  style={{
-                    fontSize: "10.5px",
-                    color: isActive ? "rgba(255,255,255,0.6)" : "var(--text-muted)",
-                    textOverflow: "ellipsis",
-                    overflow: "hidden",
-                    whiteSpace: "nowrap",
-                    marginTop: "2px",
-                    fontFamily: "var(--font-mono)",
-                    letterSpacing: "-0.2px"
-                  }}
-                  title={session.matchSnippets[0]}
-                >
-                  {session.matchSnippets[0]}
-                </span>
-              )}
             </div>
           )}
         </div>
@@ -834,7 +649,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* 快速搜索框 */}
+        {/* 快速搜索框：点击/聚焦唤起完整搜索面板（会话 + 聊天记录，分组/范围/键盘导航） */}
         <div className="search-container" style={{ display: "flex", alignItems: "center", position: "relative" }}>
           <svg
             className="search-icon"
@@ -852,49 +667,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </svg>
           <input
             type="text"
+            readOnly
             className={`search-input ${selectedAgent === "codex" ? "codex-focus" : ""}`}
-            style={{ paddingRight: "34px" }}
-            placeholder={isContentSearch ? "✨ 全局搜索聊天记录内容..." : "搜索本地会话项目..."}
-            value={searchQuery}
-            onChange={(e) => onSearchQueryChange(e.target.value)}
+            style={{ cursor: "pointer" }}
+            placeholder="搜索会话与聊天记录..."
+            onClick={() => setSearchPaletteOpen(true)}
+            onFocus={() => setSearchPaletteOpen(true)}
           />
-          <button
-            className={`search-enhance-btn ${isContentSearch ? "active" : ""}`}
-            onClick={() => setIsContentSearch(!isContentSearch)}
-            title={isContentSearch ? "切换为普通标题搜索" : "全局聊天内容搜索 (✨)"}
-            style={{
-              position: "absolute",
-              right: "8px",
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: isContentSearch ? "var(--color-primary)" : "var(--text-secondary)",
-              transition: "var(--transition-smooth)",
-              padding: "4px",
-              borderRadius: "4px"
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              <line x1="8" y1="9" x2="14" y2="9"></line>
-              <line x1="8" y1="13" x2="12" y2="13"></line>
-            </svg>
-          </button>
         </div>
       </div>
 
@@ -1090,112 +869,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* 归档区 */}
-      <div className="archive-section" ref={archiveSectionRef}>
-        <div 
-          className="archive-header"
-          onClick={() => setShowArchive(!showArchive)}
-          style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderTop: "1px solid var(--border-color)", backgroundColor: "var(--bg-sidebar)" }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="21 8 21 21 3 21 3 8"></polyline>
-              <rect x="1" y="3" width="22" height="5"></rect>
-              <line x1="10" y1="12" x2="14" y2="12"></line>
-            </svg>
-            <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-secondary)" }}>归档区</span>
-            <span style={{ fontSize: "11px", color: "var(--text-secondary)", backgroundColor: "rgba(0,0,0,0.05)", padding: "1px 6px", borderRadius: "10px" }}>{archivedProjects.length}</span>
-          </div>
-          <span className="project-chevron" style={{ transform: showArchive ? "rotate(0deg)" : "rotate(-90deg)", fontSize: "9px", color: "var(--text-secondary)" }}>▼</span>
-        </div>
-
-        {showArchive && (
-          <div className="archive-content" style={{ maxHeight: "200px", overflowY: "auto" }}>
-            {archivedProjects.length === 0 ? (
-              <div style={{ padding: "12px", fontSize: "12px", color: "var(--text-secondary)", textAlign: "center" }}>
-                暂无归档项目
-              </div>
-            ) : (
-              Object.entries(
-                archivedProjects.reduce((acc, proj) => {
-                  if (!acc[proj.archive_month]) acc[proj.archive_month] = [];
-                  acc[proj.archive_month].push(proj);
-                  return acc;
-                }, {} as Record<string, ArchivedProject[]>)
-              ).map(([month, projects]) => (
-                <div key={month} className="archive-month-group">
-                  <div style={{ padding: "4px 12px", fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)", backgroundColor: "var(--bg-active-item)", borderBottom: "1px solid var(--border-color)" }}>
-                    {month}
-                  </div>
-                  {projects.map((proj) => (
-                    <div 
-                      key={proj.id} 
-                      className="archive-item"
-                      style={{ padding: "6px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "var(--transition-smooth)" }}
-                      onClick={() => {
-                        setConfirmState({
-                          show: true,
-                          title: "还原项目",
-                          message: (
-                            <>
-                              确定要将项目「<strong style={{ color: "var(--color-orange)" }}>{proj.project_name}</strong>」还原到工作区吗？
-                            </>
-                          ),
-                          onConfirm: () => {
-                            handleRestoreArchivedProject(proj.id);
-                            setConfirmState(null);
-                          }
-                        });
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setArchiveContextMenu({ x: e.clientX, y: e.clientY, project: proj });
-                      }}
-                      title={proj.project_path}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                        </svg>
-                        <span style={{ fontSize: "12px", color: "var(--text-primary)", maxWidth: "120px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{proj.project_name}</span>
-                      </div>
-                      <span style={{ fontSize: "10px", color: "var(--text-secondary)" }} title="点击还原到工作区">还原</span>
-                    </div>
-                  ))}
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 归档项目右键菜单 */}
-      {archiveContextMenu && (
-        <div 
-          className="context-menu"
-          style={{ top: archiveContextMenu.y, left: archiveContextMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button 
-            className="context-menu-item"
-            onClick={() => {
-              handleRestoreArchivedProject(archiveContextMenu.project.id);
-              setArchiveContextMenu(null);
-            }}
-          >
-            还原到工作区
-          </button>
-          <button 
-            className="context-menu-item"
-            onClick={() => {
-              navigator.clipboard.writeText(archiveContextMenu.project.project_path).catch(() => {});
-              setArchiveContextMenu(null);
-            }}
-          >
-            复制路径
-          </button>
-        </div>
-      )}
 
       {/* 9. 自定义高档白天右键上下文悬浮菜单 */}
       {contextMenu && (
@@ -1332,15 +1005,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
           >
             复制路径
-          </button>
-          <button 
-            className="context-menu-item"
-            onClick={() => {
-              handleArchiveProject(projectContextMenu.projectName, projectContextMenu.projectPath);
-              setProjectContextMenu(null);
-            }}
-          >
-            归档项目
           </button>
           <div style={{ borderBottom: "1px dashed var(--border-color)", margin: "4px 6px" }} />
           <button 
@@ -1566,58 +1230,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         );
       })()}
 
-      {/* 全局内容搜索悬浮卡片面板 */}
-      {hoveredSession && (
-        <div 
-          className="search-match-popover"
-          style={{
-            position: "fixed",
-            left: `${(width !== undefined ? width : 300) + 8}px`,
-            top: `${hoveredSession.top}px`,
-            zIndex: 2000,
-            width: "320px",
-            backgroundColor: "var(--bg-sidebar)",
-            backdropFilter: "blur(8px)",
-            border: "1px solid var(--border-color)",
-            borderRadius: "var(--radius-md)",
-            boxShadow: "0 6px 16px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.2)",
-            padding: "10px 12px",
-            animation: "fadeInSmooth 0.15s cubic-bezier(0.16, 1, 0.3, 1)",
-            pointerEvents: "none",
-          }}
-        >
-          <div style={{
-            fontSize: "11px",
-            fontWeight: 700,
-            color: "var(--text-secondary)",
-            textTransform: "uppercase",
-            letterSpacing: "0.5px",
-            marginBottom: "8px",
-            borderBottom: "1px solid var(--border-color)",
-            paddingBottom: "6px"
-          }}>
-            ✨ 匹配记录 (最多展示 3 条)
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {hoveredSession.session.matchSnippets?.slice(0, 3).map((snippet, idx) => (
-              <div 
-                key={idx} 
-                style={{
-                  fontSize: "11.5px",
-                  color: "var(--text-primary)",
-                  lineHeight: "1.5",
-                  fontFamily: "var(--font-mono)",
-                  wordBreak: "break-all",
-                  paddingBottom: idx < 2 && idx < (hoveredSession.session.matchSnippets?.length || 0) - 1 ? "8px" : "0",
-                  borderBottom: idx < 2 && idx < (hoveredSession.session.matchSnippets?.length || 0) - 1 ? "1px dashed var(--border-color)" : "none"
-                }}
-              >
-                {highlightKeyword(snippet, searchQuery)}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 会话搜索面板（底部搜索框点击唤起：会话 + 聊天记录，分组/范围/键盘导航） */}
+      <SearchPalette
+        isOpen={searchPaletteOpen}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={(id) => {
+          setSearchPaletteOpen(false);
+          onSelectSession(id);
+        }}
+        onClose={() => setSearchPaletteOpen(false)}
+      />
       {confirmState && (
         <ConfirmModal
           show={confirmState.show}
@@ -1630,22 +1253,4 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
     </aside>
   );
-};
-
-const escapeRegExp = (str: string) => {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-};
-
-const highlightKeyword = (text: string, keyword: string) => {
-  if (!keyword) return text;
-  try {
-    const parts = text.split(new RegExp(`(${escapeRegExp(keyword)})`, "gi"));
-    return parts.map((part, index) => 
-      part.toLowerCase() === keyword.toLowerCase()
-        ? <strong key={index} style={{ color: "var(--color-primary)", fontWeight: 600 }}>{part}</strong>
-        : part
-    );
-  } catch (e) {
-    return text;
-  }
 };

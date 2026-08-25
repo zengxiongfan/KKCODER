@@ -35,6 +35,14 @@ pub(crate) fn log_session(session_id: &str, message: &str) {
     log_to_file(&format!("[session:{session_id}] {message}"));
 }
 
+/// 前端日志落盘（log.ts 批量调用）：与 log_to_file 合并写全局调试日志，
+/// 便于排查前端热路径问题（如 startDragging 失败等）
+#[tauri::command]
+fn append_frontend_log(message: String) -> Result<(), String> {
+    log_to_file(&format!("[frontend] {message}"));
+    Ok(())
+}
+
 pub struct ActiveSession {
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     writer: Arc<Mutex<Box<dyn std::io::Write + Send>>>,
@@ -4354,6 +4362,7 @@ pub fn run() {
             delete_session_permanently,
             restore_session,
             empty_trash,
+            append_frontend_log,
             cleanup_stale_sessions,
             cleanup_empty_sessions,
             get_recent_projects,

@@ -50,6 +50,7 @@ const CodexNavIcon: React.FC<{ size?: number }> = ({ size }) => (
   <CodexIcon size={size} color="var(--color-green, #22c55e)" />
 );
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DirectoryPickerModal } from "./DirectoryPickerModal";
 import { ClaudeIcon, CodexIcon, CcSwitchIcon } from "./Sidebar";
 import {
@@ -80,7 +81,7 @@ import {
   type TerminalSchemeMode,
 } from "../utils/terminalScheme";
 import { applyTheme, DEFAULT_THEME, THEME_STORAGE_KEY, THEME_DEFINITIONS } from "../utils/theme";
-import kkcoderLogo from "../assets/brand/kkcoder-logo.svg";
+import kkcoderIcon from "../assets/brand/kkcoder-icon.png";
 import { log, isDebugLogEnabled, DEBUG_LOG_KEY } from "../utils/log";
 import { notifyError, notifySuccess, formatFeedbackError } from "../utils/appFeedback";
 
@@ -313,6 +314,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
       onClose();
     }, 180);
   }, [closing, onClose]);
+
+  // 无边框窗口拖拽（对齐主界面 custom-titlebar：左键拖曳移动，双击最大化）。
+  // 设置页盖住了主标题栏，须在自身顶部拖拽区接管 startDragging
+  const handleDragMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const win = getCurrentWindow();
+    if (e.detail === 2) {
+      win.toggleMaximize().catch((err) => log(`Failed to toggle maximize: ${err}`));
+    } else {
+      win.startDragging().catch((err) => log(`Failed to start window dragging: ${err}`));
+    }
+  };
 
   useEffect(() => {
     if (show) {
@@ -918,9 +931,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   };
 return (
     <div className={`settings-embedded ${closing ? "is-closing" : "is-open"}`}>
+      {/* 全宽顶部拖拽条：设置页盖住主标题栏后由它接管窗口拖拽（左键拖移、双击最大化） */}
+      <div className="settings-drag-bar" onMouseDown={handleDragMouseDown} />
       <div className="settings-body">
         <aside className="settings-sidebar">
-          <div className="settings-sidebar-drag" data-tauri-drag-region="true" />
+          <div className="settings-sidebar-drag" onMouseDown={handleDragMouseDown} />
           <button
             type="button"
             className="settings-nav settings-nav-return"
@@ -960,7 +975,7 @@ return (
         </aside>
 
         <div className="settings-content-wrap">
-          <div className="settings-page-head" data-tauri-drag-region="true">
+          <div className="settings-page-head" onMouseDown={handleDragMouseDown}>
             <div className="settings-page-head-inner">
               <h1 className="settings-page-title">{menuTitle}</h1>
               <p className="settings-page-description">{menuDescription}</p>
@@ -1822,7 +1837,7 @@ return (
                   <div className="about-hero-card">
                     <div className="about-hero-glow" />
                     <div className="about-logo-wrapper">
-                      <img className="about-logo" src={kkcoderLogo} alt="KKCoder" draggable={false} />
+                      <img className="about-logo" src={kkcoderIcon} alt="KKCoder" draggable={false} />
                     </div>
                     <div className="about-title-row">
                       <div className="about-title">KKCoder AI 终端管理器</div>

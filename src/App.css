@@ -1815,64 +1815,6 @@ input:checked + .switch-slider:before {
   text-align: center;
 }
 
-.about-logo {
-  width: 60px;
-  height: 60px;
-  background: #111111; /* Charcoal black background */
-  border: 2px solid #f97316; /* Bright orange border */
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #f97316; /* Vibrant orange "KK" text */
-  font-weight: 800; /* Extra bold */
-  font-size: 26px;
-  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.22); /* Glowing orange drop shadow */
-  margin-bottom: 20px;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  font-family: var(--font-main);
-}
-
-.about-title {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-}
-
-.about-version {
-  font-size: 13px;
-  color: var(--text-secondary);
-  background-color: var(--bg-sidebar);
-  padding: 3px 10px;
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-
-.about-desc {
-  font-size: 13px;
-  color: #475569;
-  max-width: 420px;
-  line-height: 1.6;
-  margin-bottom: 24px;
-}
-
-.about-divider {
-  width: 100%;
-  max-width: 320px;
-  height: 1px;
-  background-color: var(--border-color);
-  margin-bottom: 24px;
-}
-
-.about-meta {
-  font-size: 11px;
-  color: #94a3b8;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 /* 顶部 Header 中的设置齿轮按钮 */
 .settings-btn {
   background: none;
@@ -1919,19 +1861,10 @@ input:checked + .switch-slider:before {
 .titlebar-logo-icon {
   width: 18px;
   height: 18px;
-  background-color: #111111; /* Charcoal black */
-  border: 1px solid var(--color-orange); /* Orange border */
   border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-orange); /* Bright orange "KK" */
-  font-size: 10px;
-  font-weight: 800;
+  display: block;
+  object-fit: contain;
   flex-shrink: 0;
-  text-shadow: 0 0.5px 1px rgba(0,0,0,0.5);
-  font-family: var(--font-main);
-  margin-right: 2px;
 }
 
 .logo-title-text {
@@ -10232,9 +10165,23 @@ input:checked + .switch-slider:before {
 .settings-embedded {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  /* 抬到 2000：确保盖住恢复提示条(z1090)/右键菜单等一切可能拦截鼠标的浮层 */
+  z-index: 2000;
   background: var(--bg-main);
   overflow: hidden;
+}
+/* 全宽顶部拖拽条：设置页内最高层，任意顶部位置可拖动窗口 */
+.settings-drag-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  z-index: 10;
+  cursor: grab;
+}
+.settings-drag-bar:active {
+  cursor: grabbing;
 }
 /* 进入 / 返回（退场）动画 */
 .settings-embedded.is-open {
@@ -11211,19 +11158,17 @@ input:checked + .switch-slider:before {
 .about-logo {
   width: 76px;
   height: 76px;
-  border-radius: 18px;
   display: block;
   object-fit: contain;
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--color-primary) 35%, transparent), 0 2px 10px rgba(0, 0, 0, 0.5);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
   user-select: none;
   -webkit-user-drag: none;
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition: transform 0.25s ease, filter 0.25s ease;
+  filter: drop-shadow(0 8px 22px rgba(0, 0, 0, 0.45));
 }
 
 .about-logo:hover {
   transform: scale(1.04) rotate(-1deg);
-  box-shadow: 0 14px 36px color-mix(in srgb, var(--color-primary) 45%, transparent), 0 4px 14px rgba(0, 0, 0, 0.6);
+  filter: drop-shadow(0 14px 30px rgba(0, 0, 0, 0.55));
 }
 
 .about-title-row {
@@ -11484,35 +11429,4 @@ input:checked + .switch-slider:before {
   background-color: var(--bg-sidebar);
   color: var(--text-primary);
   transform: rotate(35deg); /* 高级微动效：滑入时齿轮旋转 */
-}
-
-/* ==================== 极简自定义无边框窗口标题栏 ==================== */
-.custom-titlebar {
-  height: 34px;
-  background-color: var(--bg-sidebar);
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 10px;
-  user-select: none;
-  flex-shrink: 0;
-  z-index: 100;
-}
-
-.titlebar-logo {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-main);
-}
-
-.titlebar-logo-icon {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  display: block;
-  object-fit: contain;
-  flex-shrink: 0;
 }
