@@ -837,6 +837,13 @@ function App() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
+  // 右侧工作区面板展示方式：GUI 聊天会话用"推开式"（面板占位、聊天区收缩，不遮挡），
+  // 其余（CLI 终端 / Codex 终端）保留覆盖式抽屉
+  const activeWorkspacePanelInflow =
+    !!activeSession && activeSessionId
+      ? (tabRuntimeBySession.get(activeSessionId)?.useGuiChat ?? false)
+      : false;
+
   // 文件树自适应宽度：监听树内容变化，自动调整面板宽度
   // 右侧项目树打开时一次性计算合适宽度（仅当内容超出当前宽度时自动展宽）
   // 避免每次展开/折叠都触发宽度变动，用户可手动拖拽调整
@@ -2742,8 +2749,16 @@ function App() {
           <div
             className={`project-workspace-drawer ${showProjectTree ? "open" : "closed"} ${
               isResizingProjectTree ? "resizing" : ""
-            }`}
-            style={{ width: `${projectTreeWidth}px` }}
+            } ${activeWorkspacePanelInflow ? "inflow" : ""}`}
+            style={{
+              width: `${
+                activeWorkspacePanelInflow
+                  ? showProjectTree
+                    ? projectTreeWidth
+                    : 0
+                  : projectTreeWidth
+              }px`,
+            }}
             aria-hidden={!showProjectTree}
           >
             <div 

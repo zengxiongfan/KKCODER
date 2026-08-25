@@ -2951,6 +2951,28 @@ input:checked + .switch-slider:before {
   transition: none;
 }
 
+/* GUI 聊天模式（inflow）：面板作为 app-container 的普通 flex 子项排布，
+   占位并让聊天区自动收缩，不遮挡会话界面；宽度由内联 style 随 open/closed 切换 0 → projectTreeWidth */
+.project-workspace-drawer.inflow {
+  position: relative;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  z-index: auto;
+  flex-shrink: 0;
+  transition: width 0.18s ease;
+}
+
+/* 关闭时内联宽度为 0，aside 自身 overflow 负责裁内容；resizer(left:-4px) 悬在抽屉外
+   需保持可见可拖拽，故 inflow 不加 overflow:hidden */
+.project-workspace-drawer.inflow.closed {
+  pointer-events: none;
+}
+
+.project-workspace-drawer.inflow.resizing {
+  transition: none;
+}
+
 .project-tree-aside {
   width: 100%;
   background-color: var(--bg-sidebar);
