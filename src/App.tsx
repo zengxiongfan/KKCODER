@@ -12,6 +12,7 @@ import { GitPanel } from "./components/git/GitPanel";
 import { BranchPanel } from "./components/git/BranchPanel";
 import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
+import { applyTheme, readStoredTheme, THEME_DEFINITIONS, THEME_STORAGE_KEY } from "./utils/theme";
 import { FileEditor, type FileEditorHandle } from "./components/FileEditor";
 import { FileText, Folder, GitBranch, GitCommit } from "lucide-react";
 import agentdeskIcon from "./assets/brand/agentdesk-icon.png";
@@ -320,7 +321,7 @@ function App() {
   // 颜色调色盘主题切换相关状态
   const [showThemeDropdown, setShowThemeDropdown] = useState<boolean>(false);
   const [currentTheme, setCurrentTheme] = useState<string>(() => {
-    return localStorage.getItem("agentdesk_setting_theme") || "light-premium";
+    return readStoredTheme();
   });
   const [isInitLoaded, setIsInitLoaded] = useState<boolean>(false);
 
@@ -1660,128 +1661,15 @@ function App() {
       const customEvent = e as CustomEvent<string>;
       setCurrentTheme(customEvent.detail);
     };
-    window.addEventListener("agentdesk-theme-change", handleThemeEvent);
-    return () => window.removeEventListener("agentdesk-theme-change", handleThemeEvent);
+    window.addEventListener("kkcoder-theme-change", handleThemeEvent);
+    return () => window.removeEventListener("kkcoder-theme-change", handleThemeEvent);
   }, []);
-
-  const applyTheme = (themeName: string) => {
-    const root = document.documentElement;
-    let target = themeName;
-    if (themeName === "auto") {
-      target = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark-zinc" : "light-premium";
-    }
-    root.setAttribute("data-theme", target);
-
-    if (target === "dark-blue") {
-      root.style.setProperty("--bg-main", "#090d16");
-      root.style.setProperty("--bg-sidebar", "#121620");
-      root.style.setProperty("--bg-terminal", "#000000");
-      root.style.setProperty("--border-color", "#1e293b");
-      root.style.setProperty("--text-primary", "#f8fafc");
-      root.style.setProperty("--text-secondary", "#94a3b8");
-      root.style.setProperty("--color-primary", "#3b82f6");
-      root.style.setProperty("--color-primary-hover", "#2563eb");
-      root.style.setProperty("--color-orange", "#f97316");
-      root.style.setProperty("--color-orange-light", "rgba(249, 115, 22, 0.15)");
-      root.style.setProperty("--bg-active-item", "#1e293b");
-      root.style.setProperty("--text-active-item", "#ffffff");
-      root.style.setProperty("--bg-hover-item", "rgba(59, 130, 246, 0.15)");
-      root.style.setProperty("--bg-agent-selector", "rgba(0, 0, 0, 0.25)");
-      root.style.setProperty("--bg-agent-slider", "#1e293b");
-      root.style.setProperty("--shadow-agent-slider", "0 2px 5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08)");
-    } else if (target === "dark-purple") {
-      root.style.setProperty("--bg-main", "#0c0a12");
-      root.style.setProperty("--bg-sidebar", "#171424");
-      root.style.setProperty("--bg-terminal", "#000000");
-      root.style.setProperty("--border-color", "#2e2540");
-      root.style.setProperty("--text-primary", "#f5f3ff");
-      root.style.setProperty("--text-secondary", "#b7a8d6");
-      root.style.setProperty("--color-primary", "#8b5cf6");
-      root.style.setProperty("--color-primary-hover", "#7c3aed");
-      root.style.setProperty("--color-orange", "#f97316");
-      root.style.setProperty("--color-orange-light", "rgba(249, 115, 22, 0.15)");
-      root.style.setProperty("--bg-active-item", "#2f2647");
-      root.style.setProperty("--text-active-item", "#ffffff");
-      root.style.setProperty("--bg-hover-item", "rgba(139, 92, 246, 0.15)");
-      root.style.setProperty("--bg-agent-selector", "rgba(0, 0, 0, 0.25)");
-      root.style.setProperty("--bg-agent-slider", "#2f2647");
-      root.style.setProperty("--shadow-agent-slider", "0 2px 5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08)");
-    } else if (target === "dark-zinc") {
-      root.style.setProperty("--bg-main", "#0c0b0a");
-      root.style.setProperty("--bg-sidebar", "#1d1b18");
-      root.style.setProperty("--bg-terminal", "#000000");
-      root.style.setProperty("--border-color", "#332f29");
-      root.style.setProperty("--text-primary", "#fafaf9");
-      root.style.setProperty("--text-secondary", "#cbd5e1");
-      root.style.setProperty("--color-primary", "#d97706");
-      root.style.setProperty("--color-primary-hover", "#b55c04");
-      root.style.setProperty("--color-orange", "#d97706");
-      root.style.setProperty("--color-orange-light", "rgba(217, 119, 6, 0.15)");
-      root.style.setProperty("--bg-active-item", "#383227");
-      root.style.setProperty("--text-active-item", "#ffffff");
-      root.style.setProperty("--bg-hover-item", "rgba(245, 158, 11, 0.15)");
-      root.style.setProperty("--bg-agent-selector", "rgba(0, 0, 0, 0.25)");
-      root.style.setProperty("--bg-agent-slider", "#383227");
-      root.style.setProperty("--shadow-agent-slider", "0 2px 5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08)");
-    } else if (target === "light-blue") {
-      root.style.setProperty("--bg-main", "#ffffff");
-      root.style.setProperty("--bg-sidebar", "#f0f7ff");
-      root.style.setProperty("--bg-terminal", "#f8fafc");
-      root.style.setProperty("--border-color", "#bae6fd");
-      root.style.setProperty("--text-primary", "#0369a1");
-      root.style.setProperty("--text-secondary", "#0284c7");
-      root.style.setProperty("--color-primary", "#0284c7");
-      root.style.setProperty("--color-primary-hover", "#0369a1");
-      root.style.setProperty("--color-orange", "#f97316");
-      root.style.setProperty("--color-orange-light", "#fff7ed");
-      root.style.setProperty("--bg-active-item", "#e0f2fe");
-      root.style.setProperty("--text-active-item", "#0369a1");
-      root.style.setProperty("--bg-hover-item", "rgba(2, 132, 199, 0.08)");
-      root.style.setProperty("--bg-agent-selector", "rgba(2, 132, 199, 0.06)");
-      root.style.setProperty("--bg-agent-slider", "#ffffff");
-      root.style.setProperty("--shadow-agent-slider", "0 2px 4px rgba(2, 132, 199, 0.1), 0 1px 2px rgba(2, 132, 199, 0.05)");
-    } else if (target === "light-orange") {
-      root.style.setProperty("--bg-main", "#ffffff");
-      root.style.setProperty("--bg-sidebar", "#fffcf5");
-      root.style.setProperty("--bg-terminal", "#fffdfa");
-      root.style.setProperty("--border-color", "#fed7aa");
-      root.style.setProperty("--text-primary", "#7c2d12");
-      root.style.setProperty("--text-secondary", "#ea580c");
-      root.style.setProperty("--color-primary", "#c2410c");
-      root.style.setProperty("--color-primary-hover", "#9a3412");
-      root.style.setProperty("--color-orange", "#ea580c");
-      root.style.setProperty("--color-orange-light", "#fff7ed");
-      root.style.setProperty("--bg-active-item", "#ffedd5");
-      root.style.setProperty("--text-active-item", "#7c2d12");
-      root.style.setProperty("--bg-hover-item", "rgba(234, 88, 12, 0.08)");
-      root.style.setProperty("--bg-agent-selector", "rgba(234, 88, 12, 0.05)");
-      root.style.setProperty("--bg-agent-slider", "#ffffff");
-      root.style.setProperty("--shadow-agent-slider", "0 2px 4px rgba(234, 88, 12, 0.08), 0 1px 2px rgba(234, 88, 12, 0.04)");
-    } else {
-      root.style.setProperty("--bg-main", "#ffffff");
-      root.style.setProperty("--bg-sidebar", "#f8fafc");
-      root.style.setProperty("--bg-terminal", "#f8fafc");
-      root.style.setProperty("--border-color", "#e2e8f0");
-      root.style.setProperty("--text-primary", "#1e293b");
-      root.style.setProperty("--text-secondary", "#64748b");
-      root.style.setProperty("--color-primary", "#2563eb");
-      root.style.setProperty("--color-primary-hover", "#1d4ed8");
-      root.style.setProperty("--color-orange", "#f97316");
-      root.style.setProperty("--color-orange-light", "#fff7ed");
-      root.style.setProperty("--bg-active-item", "#dbeafe");
-      root.style.setProperty("--text-active-item", "#1e40af");
-      root.style.setProperty("--bg-hover-item", "rgba(59, 130, 246, 0.08)");
-      root.style.setProperty("--bg-agent-selector", "rgba(15, 23, 42, 0.05)");
-      root.style.setProperty("--bg-agent-slider", "#ffffff");
-      root.style.setProperty("--shadow-agent-slider", "0 2px 4px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04)");
-    }
-  };
 
   const handleSelectTheme = (newTheme: string) => {
     setCurrentTheme(newTheme);
-    localStorage.setItem("agentdesk_setting_theme", newTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, newTheme);
     applyTheme(newTheme);
-    window.dispatchEvent(new CustomEvent("agentdesk-theme-change", { detail: newTheme }));
+    window.dispatchEvent(new CustomEvent("kkcoder-theme-change", { detail: newTheme }));
   };
 
   // 💾 保存标签页的行内重命名并同步数据库
@@ -2079,73 +1967,30 @@ function App() {
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="theme-dropdown-section">
-                  <div className="theme-dropdown-section-title">深色</div>
-                  <div
-                    className={`theme-dropdown-item ${currentTheme === "dark-blue" ? "active" : ""}`}
-                    onClick={() => handleSelectTheme("dark-blue")}
-                  >
-                    <span className="theme-preview-dots">
-                      <span className="theme-dot" style={{ backgroundColor: "#121620" }}></span>
-                      <span className="theme-dot" style={{ backgroundColor: "#3b82f6" }}></span>
-                    </span>
-                    <span className="theme-name">深空墨</span>
+                {(["dark", "light"] as const).map((group) => (
+                  <div className="theme-dropdown-section" key={group}>
+                    <div className="theme-dropdown-section-title">{group === "dark" ? "深色" : "浅色"}</div>
+                    {THEME_DEFINITIONS.filter((t) => t.group === group).map((t) => (
+                      <div
+                        key={t.id}
+                        className={`theme-dropdown-item ${currentTheme === t.id ? "active" : ""}`}
+                        onClick={() => handleSelectTheme(t.id)}
+                      >
+                        <span className="theme-preview-dots">
+                          <span
+                            className="theme-dot"
+                            style={{
+                              backgroundColor: t.preview.bg,
+                              ...(t.group === "light" ? { border: `1px solid ${t.preview.border || "#e2e8f0"}` } : {}),
+                            }}
+                          ></span>
+                          <span className="theme-dot" style={{ backgroundColor: t.preview.accent }}></span>
+                        </span>
+                        <span className="theme-name">{t.name}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div
-                    className={`theme-dropdown-item ${currentTheme === "dark-purple" ? "active" : ""}`}
-                    onClick={() => handleSelectTheme("dark-purple")}
-                  >
-                    <span className="theme-preview-dots">
-                      <span className="theme-dot" style={{ backgroundColor: "#171424" }}></span>
-                      <span className="theme-dot" style={{ backgroundColor: "#8b5cf6" }}></span>
-                    </span>
-                    <span className="theme-name">赛博紫</span>
-                  </div>
-                  <div
-                    className={`theme-dropdown-item ${currentTheme === "dark-zinc" ? "active" : ""}`}
-                    onClick={() => handleSelectTheme("dark-zinc")}
-                  >
-                    <span className="theme-preview-dots">
-                      <span className="theme-dot" style={{ backgroundColor: "#1d1b18" }}></span>
-                      <span className="theme-dot" style={{ backgroundColor: "#d97706" }}></span>
-                    </span>
-                    <span className="theme-name">琥珀金</span>
-                  </div>
-                </div>
-
-                <div className="theme-dropdown-section">
-                  <div className="theme-dropdown-section-title">浅色</div>
-                  <div
-                    className={`theme-dropdown-item ${currentTheme === "light-premium" ? "active" : ""}`}
-                    onClick={() => handleSelectTheme("light-premium")}
-                  >
-                    <span className="theme-preview-dots">
-                      <span className="theme-dot" style={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0" }}></span>
-                      <span className="theme-dot" style={{ backgroundColor: "#2563eb" }}></span>
-                    </span>
-                    <span className="theme-name">经典白</span>
-                  </div>
-                  <div
-                    className={`theme-dropdown-item ${currentTheme === "light-orange" ? "active" : ""}`}
-                    onClick={() => handleSelectTheme("light-orange")}
-                  >
-                    <span className="theme-preview-dots">
-                      <span className="theme-dot" style={{ backgroundColor: "#ffffff", border: "1px solid #fed7aa" }}></span>
-                      <span className="theme-dot" style={{ backgroundColor: "#ea580c" }}></span>
-                    </span>
-                    <span className="theme-name">暖沙</span>
-                  </div>
-                  <div
-                    className={`theme-dropdown-item ${currentTheme === "light-blue" ? "active" : ""}`}
-                    onClick={() => handleSelectTheme("light-blue")}
-                  >
-                    <span className="theme-preview-dots">
-                      <span className="theme-dot" style={{ backgroundColor: "#ffffff", border: "1px solid #bae6fd" }}></span>
-                      <span className="theme-dot" style={{ backgroundColor: "#0284c7" }}></span>
-                    </span>
-                    <span className="theme-name">天空蓝</span>
-                  </div>
-                </div>
+                ))}
 
                 <div className="theme-dropdown-divider"></div>
 

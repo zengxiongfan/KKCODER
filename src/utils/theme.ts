@@ -8,6 +8,7 @@ export type ThemeName =
   | "dark-blue"
   | "dark-purple"
   | "light-premium"
+  | "light-blue"
   | "light-orange";
 
 export type ThemeGroup = "dark" | "light" | "system";
@@ -29,9 +30,9 @@ export const THEME_DEFINITIONS: ThemeDefinition[] = [
   // 深色 4 种风格
   {
     id: "dark-zinc",
-    name: "KK金",
+    name: "琥珀金",
     group: "dark",
-    description: "经典碳黑底色与沉稳温暖的KK金",
+    description: "经典碳黑底色与沉稳温暖的琥珀金",
     preview: { bg: "#1d1b18", accent: "#d97706" },
   },
   {
@@ -65,6 +66,13 @@ export const THEME_DEFINITIONS: ThemeDefinition[] = [
     preview: { bg: "#ffffff", accent: "#0f172a", border: "#e2e8f0" },
   },
   {
+    id: "light-blue",
+    name: "天空蓝",
+    group: "light",
+    description: "清爽明亮的天空蓝浅色主题",
+    preview: { bg: "#ffffff", accent: "#0284c7", border: "#bae6fd" },
+  },
+  {
     id: "light-orange",
     name: "暖沙橙",
     group: "light",
@@ -77,7 +85,7 @@ export const THEME_DEFINITIONS: ThemeDefinition[] = [
     id: "auto",
     name: "跟随系统",
     group: "system",
-    description: "根据操作系统明暗模式自动切换（深色默认KK金）",
+    description: "根据操作系统明暗模式自动切换（深色默认琥珀金）",
     preview: { bg: "#ffffff", accent: "#1e293b", split: true },
   },
 ];
@@ -85,7 +93,7 @@ export const THEME_DEFINITIONS: ThemeDefinition[] = [
 type ThemeCssVariables = Record<string, string>;
 
 const THEME_VARIABLES: Record<Exclude<ThemeName, "auto">, ThemeCssVariables> = {
-  // 原版KK金精准色调（沉稳黑金）
+  // 原版琥珀金精准色调（沉稳黑金）
   "dark-zinc": {
     "--bg-main": "#0c0b0a",
     "--bg-sidebar": "#1d1b18",
@@ -240,6 +248,37 @@ const THEME_VARIABLES: Record<Exclude<ThemeName, "auto">, ThemeCssVariables> = {
     "--scrollbar-thumb": "rgba(107, 114, 128, 0.22)",
     "--scrollbar-thumb-hover": "rgba(107, 114, 128, 0.42)",
   },
+  // 天空蓝
+  "light-blue": {
+    "--bg-main": "#ffffff",
+    "--bg-sidebar": "#f0f7ff",
+    "--bg-terminal": "#f8fafc",
+    "--border-color": "#bae6fd",
+    "--text-primary": "#0369a1",
+    "--text-secondary": "#0284c7",
+    "--color-primary": "#0284c7",
+    "--color-primary-hover": "#0369a1",
+    "--color-orange": "#f97316",
+    "--color-orange-light": "#fff7ed",
+    "--bg-active-item": "#e0f2fe",
+    "--text-active-item": "#0369a1",
+    "--bg-hover-item": "rgba(2, 132, 199, 0.08)",
+    "--bg-agent-selector": "rgba(2, 132, 199, 0.06)",
+    "--bg-agent-slider": "#ffffff",
+    "--shadow-agent-slider": "0 2px 4px rgba(2, 132, 199, 0.1), 0 1px 2px rgba(2, 132, 199, 0.05)",
+    "--code-inline-bg": "#e0f2fe",
+    "--code-inline-text": "#0369a1",
+    "--code-inline-border": "#bae6fd",
+    "--code-block-bg": "#f0f7ff",
+    "--code-block-border": "#bae6fd",
+    "--quote-bg": "#f0f7ff",
+    "--quote-border": "#0284c7",
+    "--quote-text": "#475569",
+    "--table-header-bg": "#e0f2fe",
+    "--table-border": "#bae6fd",
+    "--scrollbar-thumb": "rgba(2, 132, 199, 0.22)",
+    "--scrollbar-thumb-hover": "rgba(2, 132, 199, 0.42)",
+  },
   // 暖沙橙
   "light-orange": {
     "--bg-main": "#ffffff",
@@ -296,7 +335,15 @@ export function applyTheme(themeName: string): void {
 }
 
 export function readStoredTheme(): string {
-  return localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME;
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored) return stored;
+  // 旧版（AgentDesk 时期）key 一次性迁移到新 key，老用户升级不丢主题
+  const legacy = localStorage.getItem("agentdesk_setting_theme");
+  if (legacy) {
+    localStorage.setItem(THEME_STORAGE_KEY, legacy);
+    return legacy;
+  }
+  return DEFAULT_THEME;
 }
 
 export function persistTheme(themeName: string): void {

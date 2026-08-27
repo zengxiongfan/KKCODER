@@ -80,7 +80,7 @@ import {
   dispatchTerminalSchemeChange,
   type TerminalSchemeMode,
 } from "../utils/terminalScheme";
-import { applyTheme, DEFAULT_THEME, THEME_STORAGE_KEY, THEME_DEFINITIONS } from "../utils/theme";
+import { applyTheme, readStoredTheme, THEME_STORAGE_KEY, THEME_DEFINITIONS } from "../utils/theme";
 import agentdeskIcon from "../assets/brand/agentdesk-icon.png";
 import { log, isDebugLogEnabled, DEBUG_LOG_KEY } from "../utils/log";
 import { notifyError, notifySuccess, formatFeedbackError } from "../utils/appFeedback";
@@ -345,7 +345,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   // --- 1. 读取并配置各项通用设置 (持久化存储) ---
   const [theme, setTheme] = useState<string>(() => {
-    return localStorage.getItem(THEME_STORAGE_KEY) || DEFAULT_THEME;
+    return readStoredTheme();
   });
   // 调试日志开关（默认开启）
   const [debugLogEnabled, setDebugLogEnabled] = useState<boolean>(() => isDebugLogEnabled());
@@ -612,11 +612,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   // --- 2. 写入各项设置至 localStorage ---
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
-    // 兼容旧组件（App 侧栏 / TerminalTab 启动读 agentdesk_setting_theme）
-    localStorage.setItem("agentdesk_setting_theme", theme);
     applyTheme(theme);
     window.dispatchEvent(new CustomEvent("kkcoder-theme-change", { detail: theme }));
-    window.dispatchEvent(new CustomEvent("agentdesk-theme-change", { detail: theme }));
     log(`[settings] theme -> ${theme}`);
   }, [theme]);
 
@@ -630,7 +627,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
       }
     };
     window.addEventListener("kkcoder-theme-change", handleExternalThemeChange);
-    return () => window.removeEventListener("kkcoder-theme-change", handleExternalThemeChange);
+    return () => {
+      window.removeEventListener("kkcoder-theme-change", handleExternalThemeChange);
+    };
   }, [theme]);
 
   useEffect(() => {

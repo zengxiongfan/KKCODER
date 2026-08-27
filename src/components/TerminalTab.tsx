@@ -8,6 +8,7 @@ import {
   captureUserInputData,
   deriveSessionTitleFromInput,
 } from "../utils/sessionTitle";
+import { readStoredTheme } from "../utils/theme";
 
 interface TerminalTabProps {
   sessionId: string;
@@ -28,7 +29,7 @@ interface TerminalTabProps {
 
 const getTerminalThemeColors = (themeName: string) => {
   let isDark = false;
-  if (themeName === "dark-blue" || themeName === "dark-purple" || themeName === "dark-zinc") {
+  if (themeName === "dark-blue" || themeName === "dark-purple" || themeName === "dark-zinc" || themeName === "dark-gray") {
     isDark = true;
   } else if (themeName === "auto") {
     isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -321,7 +322,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
     log("Initializing Terminal instance...");
     // 1. 根据当前选择的主题自适应配置终端黑白底色 (前三个黑底，后三个白底)
-    const savedTheme = localStorage.getItem("agentdesk_setting_theme") || "light-premium";
+    const savedTheme = readStoredTheme();
     const savedFont = localStorage.getItem("agentdesk_setting_font_family") || "Cascadia Mono";
     const savedSizeStr = localStorage.getItem("agentdesk_setting_font_size");
     const savedSize = savedSizeStr ? parseFloat(savedSizeStr) : 13.5;
@@ -1063,7 +1064,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       const newColors = getTerminalThemeColors(newTheme);
       term.options.theme = newColors;
     };
-    window.addEventListener("agentdesk-theme-change", handleThemeChange);
+    window.addEventListener("kkcoder-theme-change", handleThemeChange);
 
     // 7b. 监听终端字体切换的全局自定义事件，实现 PTY 终端字体实时更新
     const handleFontChange = (e: Event) => {
@@ -1111,7 +1112,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         parentElement.removeEventListener("scroll", handleScrollCapture, true);
       }
       resizeObserver.disconnect();
-      window.removeEventListener("agentdesk-theme-change", handleThemeChange);
+      window.removeEventListener("kkcoder-theme-change", handleThemeChange);
       window.removeEventListener("agentdesk-font-change", handleFontChange);
       window.removeEventListener("agentdesk-font-size-change", handleFontSizeChange);
       window.removeEventListener("agentdesk-insert-conversation-tag", handleInsertConversationTag);
