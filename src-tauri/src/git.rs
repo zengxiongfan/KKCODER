@@ -238,7 +238,7 @@ pub fn stash_and_switch_git_branch(branch: String, cwd: Option<String>) -> Resul
     let cwd_ref = cwd.as_deref();
 
     // 1. git stash push
-    let stash_msg = format!("KKCoder 切换分支至 {} 前自动暂存", branch);
+    let stash_msg = format!("AgentDesk 切换分支至 {} 前自动暂存", branch);
     let stash_out = create_git_cmd(cwd_ref)
         .args(["stash", "push", "-m", &stash_msg])
         .output()

@@ -1,7 +1,7 @@
 # Obsidian Amber (曜琥) 极简设计系统规范
 > **Universal Ultra-Minimalist Single-Theme Design Specification**
 > 
-> 本规范提炼自 KKCoder 极简主义设计范式，针对通用软件界面（如 IDE、终端管理器、看板、复杂后台系统等）进行了二次升级。摒弃了冗余的多主题切换，聚焦于单套 **“曜石与琥珀 (Obsidian & Amber)”** 极致暗黑配色，提供最高层级的视觉心流与精细微交互规范。
+> 本规范提炼自 AgentDesk 极简主义设计范式，针对通用软件界面（如 IDE、终端管理器、看板、复杂后台系统等）进行了二次升级。摒弃了冗余的多主题切换，聚焦于单套 **“曜石与琥珀 (Obsidian & Amber)”** 极致暗黑配色，提供最高层级的视觉心流与精细微交互规范。
 
 ---
 

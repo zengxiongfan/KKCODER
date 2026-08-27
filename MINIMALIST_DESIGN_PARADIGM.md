@@ -1,8 +1,8 @@
-# KKCoder 极简主义设计范式与前端改造自我检查清单 (Minimalist Design Paradigm & Audit Checklist)
+# AgentDesk 极简主义设计范式与前端改造自我检查清单 (Minimalist Design Paradigm & Audit Checklist)
 
 > [!IMPORTANT]
 > **设计纲领：极简、克制、极致易读。**
-> KKCoder 是面向硬核开发者与高阶 AI 心流打造的客户端。一切界面元素必须摒弃廉价的玩具感，禁止使用原生 Emoji 作为主要 UI 元素，推崇高精度矢量 SVG 与无框扁平化（Flat Minimalist）交互。每次进行前端改造时，必须严格执行本规范！
+> AgentDesk 是面向硬核开发者与高阶 AI 心流打造的客户端。一切界面元素必须摒弃廉价的玩具感，禁止使用原生 Emoji 作为主要 UI 元素，推崇高精度矢量 SVG 与无框扁平化（Flat Minimalist）交互。每次进行前端改造时，必须严格执行本规范！
 
 ---
 

@@ -300,7 +300,7 @@ export const RemoteSettingsPanel: React.FC = () => {
                 <input type="text" value={publicUrl}
                   onChange={(e) => { setPublicUrl(e.target.value); setTestResult(null); }}
                   onBlur={handleSavePublicUrl}
-                  placeholder="https://kkcoder.example.com 或 http://IP:端口"
+                  placeholder="https://agentdesk.example.com 或 http://IP:端口"
                   style={{ ...inputStyle, flex: 1 }}
                 />
                 <button onClick={handleTestUrl} disabled={testing || !publicUrl.trim()}

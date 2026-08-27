@@ -728,7 +728,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   const [copiedDiag, setCopiedDiag] = useState(false);
 
   const handleCopyVersion = () => {
-    navigator.clipboard.writeText("KKCoder v1.2.0").then(() => {
+    navigator.clipboard.writeText("AgentDesk v1.2.0").then(() => {
       setCopiedVersion(true);
       notifySuccess("版本号已复制到剪贴板");
       setTimeout(() => setCopiedVersion(false), 2000);
@@ -737,13 +737,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
 
   const handleCopyDiagnosticInfo = () => {
     const diag = [
-      `=== KKCoder Diagnostic Info ===`,
+      `=== AgentDesk Diagnostic Info ===`,
       `Version: v1.2.0`,
       `Platform: ${navigator.userAgent}`,
       `Theme: ${theme}`,
       `Claude Terminal Mode: ${claudeTerminalMode}`,
       `Interaction Mode: ${claudeInteractionMode}`,
-      `Repository: https://github.com/xulijian666/KKCODER`,
+      `Repository: https://github.com/zengxiongfan/KKCODER (branch: simon-dev)`,
       `Timestamp: ${new Date().toISOString()}`,
     ].join("\n");
     navigator.clipboard.writeText(diag).then(() => {
@@ -1836,10 +1836,10 @@ return (
                   <div className="about-hero-card">
                     <div className="about-hero-glow" />
                     <div className="about-logo-wrapper">
-                      <img className="about-logo" src={agentdeskIcon} alt="KKCoder" draggable={false} />
+                      <img className="about-logo" src={agentdeskIcon} alt="AgentDesk" draggable={false} />
                     </div>
                     <div className="about-title-row">
-                      <div className="about-title">KKCoder AI 终端管理器</div>
+                      <div className="about-title">AgentDesk AI 终端管理器</div>
                       <button
                         type="button"
                         className="about-version-badge"
@@ -1858,7 +1858,7 @@ return (
                       <button
                         type="button"
                         className="about-action-btn about-action-btn-primary"
-                        onClick={() => openExternalUrl("https://github.com/xulijian666/KKCODER")}
+                        onClick={() => openExternalUrl("https://github.com/zengxiongfan/KKCODER")}
                       >
                         <GitHubIcon size={14} />
                         <span>GitHub 仓库</span>
@@ -1867,7 +1867,7 @@ return (
                       <button
                         type="button"
                         className="about-action-btn about-action-btn-secondary"
-                        onClick={() => openExternalUrl("https://github.com/xulijian666/KKCODER/issues")}
+                        onClick={() => openExternalUrl("https://github.com/zengxiongfan/KKCODER/issues")}
                       >
                         <Bug size={13} />
                         <span>问题与建议</span>
@@ -1876,7 +1876,7 @@ return (
                       <button
                         type="button"
                         className="about-action-btn about-action-btn-secondary"
-                        onClick={() => openExternalUrl("https://github.com/xulijian666/KKCODER/releases")}
+                        onClick={() => openExternalUrl("https://github.com/zengxiongfan/KKCODER/releases")}
                       >
                         <Sparkles size={13} />
                         <span>版本发布日志</span>
@@ -1945,7 +1945,7 @@ return (
                         </div>
                         <div className="about-spec-item">
                           <span className="about-spec-label">开源项目</span>
-                          <span className="about-spec-value">xulijian666/KKCODER</span>
+                          <span className="about-spec-value">zengxiongfan/KKCODER · simon-dev</span>
                         </div>
                         <div className="about-spec-item">
                           <span className="about-spec-label">底层运行时</span>
@@ -1998,7 +1998,7 @@ return (
                       <span>Xterm.js</span>
                     </div>
                     <div className="about-footer-copy">
-                      © 2026 KKCoder Studio. Crafted with craftsmanship for developers.
+                      © 2026 AgentDesk Studio. Crafted with craftsmanship for developers.
                     </div>
                   </div>
                 </div>

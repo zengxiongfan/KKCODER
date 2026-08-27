@@ -1692,7 +1692,7 @@ export const ChatTab: React.FC<ChatTabProps> = React.memo((props) => {
             invoke("play_notification_sound", {
               tone: chatTone,
               volume: chatVolume,
-              title: chatNotify ? "KKCoder · 任务完成" : null,
+              title: chatNotify ? "AgentDesk · 任务完成" : null,
               message: chatNotify ? "✨ Claude 已回复完毕，点击切回查看" : null,
             }).catch((err) => log(`[chat] play notification failed: ${err}`));
           }

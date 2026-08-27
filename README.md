@@ -1,4 +1,4 @@
-# KKCoder (极简 AI 终端管理器)
+# AgentDesk (极简 AI 终端管理器)
 
 ```text
 █  █ █  █ ▄▄▄▄          █
@@ -24,9 +24,9 @@
 
 ## 📖 项目简介
 
-**KKCoder** 是一款专门为 AI 开发者、极客量身定制的 AI 终端辅助管理器。它无缝整合了 **Claude Code** 与 **Codex** 等新一代命令行 AI 助手，摒弃了传统终端纷杂混乱、难以管理的痛点。
+**AgentDesk** 是一款专门为 AI 开发者、极客量身定制的 AI 终端辅助管理器。它无缝整合了 **Claude Code** 与 **Codex** 等新一代命令行 AI 助手，摒弃了传统终端纷杂混乱、难以管理的痛点。
 
-通过 Tauri v2 的高性能跨语言渲染、轻量级的 SQLite 本地持久化、以及高度定制的 xterm.js 虚拟终端，KKCoder 创造了一个集**多会话项目树管理、回收站容灾、无痕临时调试、多主题自适应、系统级通知提示**于一体的高端开发心流保护区。
+通过 Tauri v2 的高性能跨语言渲染、轻量级的 SQLite 本地持久化、以及高度定制的 xterm.js 虚拟终端，AgentDesk 创造了一个集**多会话项目树管理、回收站容灾、无痕临时调试、多主题自适应、系统级通知提示**于一体的高端开发心流保护区。
 
 ---
 
@@ -95,7 +95,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/xulijian666/KKCODER.git
+git clone https://github.com/zengxiongfan/KKCODER.git
 cd KKCODER
 
 # 安装前端依赖项
@@ -152,7 +152,7 @@ KKCODER/
 ## 🤝 参与贡献
 
 我们非常欢迎来自开源社区的任何贡献（PR / Issues）！
-* 如果您发现了 Bug 或有更好的 feature 设想，请随时提交 [Issue](https://github.com/xulijian666/KKCODER/issues)。
+* 如果您发现了 Bug 或有更好的 feature 设想，请随时提交 [Issue](https://github.com/zengxiongfan/KKCODER/issues)。
 * 提交 PR 前请确保运行 `npm run build` 和 `cargo check`，以保证前后端代码能 100% 成功编译通过。
 
 ---

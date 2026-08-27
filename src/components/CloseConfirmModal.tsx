@@ -47,7 +47,7 @@ export const CloseConfirmModal: React.FC<CloseConfirmModalProps> = ({
       <div className="modal-card select-confirm-modal" style={{ width: "420px" }}>
         <div className="modal-header">
           <span className="modal-title" style={{ fontSize: "15px", fontWeight: 700 }}>
-            退出 KKCoder
+            退出 AgentDesk
           </span>
           <button type="button" className="modal-close" onClick={onCancel}>
             ✕
