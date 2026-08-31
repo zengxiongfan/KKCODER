@@ -5,7 +5,7 @@ import { Sidebar, Session, ClaudeIcon, CodexIcon } from "./components/Sidebar";
 import { TerminalTab } from "./components/TerminalTab";
 import { ChatTab } from "./components";
 import { NewSessionModal } from "./components/NewSessionModal";
-import { SettingsModal } from "./components/SettingsModal";
+import { SettingsModal, type SettingsMenuId } from "./components/SettingsModal";
 import { MdEditorModal } from "./components/MdEditorModal";
 import { ProjectTree } from "./components/ProjectTree";
 import { GitPanel } from "./components/git/GitPanel";
@@ -139,9 +139,16 @@ function App() {
   };
 
   const handleLaunchCcswitch = () => {
-    const path = localStorage.getItem("agentdesk_setting_ccswitch_path") || "";
+    // 正式 key 为 agentdesk_setting_ccswitch_path；旧 kkcoder key 兼容迁移
+    const path =
+      localStorage.getItem("agentdesk_setting_ccswitch_path")
+      || localStorage.getItem("kkcoder_setting_ccswitch_path")
+      || "";
     if (!path.trim()) {
-      alert("请先在「设置」->「终端设置」中配置 ccswitch.exe 的路径。");
+      alert("请先在「设置」->「CC Switch」中配置 ccswitch.exe 的路径。");
+      // 用户点确定后直接打开设置并定位到 CC Switch 页
+      setSettingsMenuRequest("ccswitch");
+      setShowSettings(true);
       return;
     }
     invoke("launch_ccswitch", { path }).catch((err) => {
@@ -292,6 +299,8 @@ function App() {
   const [showModal, setShowModal] = useState<boolean>(false);
   const [prefilledProjectPath, setPrefilledProjectPath] = useState<string | undefined>(undefined);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  // 外部请求直达的设置菜单（首页按钮未配置提示 → 打开设置对应页）
+  const [settingsMenuRequest, setSettingsMenuRequest] = useState<SettingsMenuId | null>(null);
   const [showMdEditor, setShowMdEditor] = useState<boolean>(false);
   const [newSessionIds, setNewSessionIds] = useState<string[]>([]);
 
@@ -2754,6 +2763,8 @@ function App() {
       <SettingsModal
         show={showSettings}
         onClose={() => setShowSettings(false)}
+        requestedMenu={settingsMenuRequest}
+        onRequestedMenuHandled={() => setSettingsMenuRequest(null)}
         onSessionsRenamed={() => {
           invoke<Session[]>("get_sessions")
             .then((data) => { if (data) setSessions(data); })

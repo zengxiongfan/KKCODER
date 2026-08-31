@@ -1728,6 +1728,107 @@ fn get_codex_latest_version() -> Result<String, String> {
     query_npm_latest_version("@openai/codex")
 }
 
+/// npm 安装过程日志事件载荷
+#[derive(Clone, serde::Serialize)]
+struct NpmInstallLogPayload {
+    package: String,
+    data: String,
+}
+
+/// npm 安装完成事件载荷
+#[derive(Clone, serde::Serialize)]
+struct NpmInstallFinishedPayload {
+    package: String,
+    success: bool,
+    code: Option<i32>,
+}
+
+/// 后台执行 `npm install -g <package>[@version]`，逐行日志经 `npm-install-log` 事件推送，
+/// 结束后经 `npm-install-finished` 事件推送结果，前端可据此展示实时进度与错误明细。
+/// 注意：命令必须立即返回，实际安装整体放置在独立 OS 线程执行，否则会阻塞
+/// WebView 的 IPC 线程导致整个界面卡死（未响应）。
+#[tauri::command]
+fn npm_install_package(package: String, version: Option<String>, app: AppHandle) -> Result<(), String> {
+    std::thread::spawn(move || {
+        if let Err(e) = run_npm_install(&app, &package, version.as_deref()) {
+            log_to_file(&format!("npm_install_package 失败: {}", e));
+            let _ = app.emit(
+                "npm-install-log",
+                NpmInstallLogPayload { package: package.clone(), data: e },
+            );
+            let _ = app.emit(
+                "npm-install-finished",
+                NpmInstallFinishedPayload { package, success: false, code: None },
+            );
+        }
+    });
+    Ok(())
+}
+
+/// 在独立线程中执行 npm install 并推送日志/结果事件
+fn run_npm_install(app: &AppHandle, package: &str, version: Option<&str>) -> Result<bool, String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+
+    let npm = get_npm_command();
+    let target = match version {
+        Some(v) => format!("{}@{}", package, v),
+        None => package.to_string(),
+    };
+
+    let mut cmd = Command::new(npm);
+    cmd.args(["install", "-g", target.as_str()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("启动 npm install 失败: {}", e))?;
+    let stdout = child.stdout.take().ok_or("读取 npm stdout 失败")?;
+    let stderr = child.stderr.take().ok_or("读取 npm stderr 失败")?;
+
+    let pipe = |stream: Box<dyn std::io::Read + Send>, app: &AppHandle, pkg: &str| {
+        let app = (*app).clone();
+        let pkg = pkg.to_string();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stream);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let trimmed = line.trim_end().to_string();
+                        if !trimmed.is_empty() {
+                            let _ = app.emit(
+                                "npm-install-log",
+                                NpmInstallLogPayload { package: pkg.clone(), data: trimmed },
+                            );
+                        }
+                    }
+                }
+            }
+        })
+    };
+
+    let stdout_thread = pipe(Box::new(stdout), app, package);
+    let stderr_thread = pipe(Box::new(stderr), app, package);
+
+    let status = child.wait().map_err(|e| format!("等待 npm install 失败: {}", e))?;
+    let success = status.success();
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
+
+    let _ = app.emit(
+        "npm-install-finished",
+        NpmInstallFinishedPayload { package: package.to_string(), success, code: status.code() },
+    );
+    Ok(success)
+}
+
 #[tauri::command]
 fn get_claude_version() -> Result<String, String> {
     use std::process::Command;
@@ -4387,6 +4488,7 @@ pub fn run() {
             get_codex_version,
             get_claude_latest_version,
             get_codex_latest_version,
+            npm_install_package,
             check_if_paths_exist,
             archive_project,
             get_archived_projects,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -50,6 +50,7 @@ const CodexNavIcon: React.FC<{ size?: number }> = ({ size }) => (
   <CodexIcon size={size} color="var(--color-green, #22c55e)" />
 );
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DirectoryPickerModal } from "./DirectoryPickerModal";
 import { ClaudeIcon, CodexIcon, CcSwitchIcon } from "./Sidebar";
@@ -107,7 +108,7 @@ interface RenameResult {
 }
 
 
-type SettingsMenuId =
+export type SettingsMenuId =
   | "basic"
   | "claude"
   | "codex"
@@ -168,6 +169,9 @@ interface SettingsModalProps {
   show: boolean;
   onClose: () => void;
   onSessionsRenamed?: () => void; // 修正完成后刷新会话列表
+  /** 外部请求直接打开某个菜单（如首页 CC Switch 未配置提示后直达），每次请求处理后由父级清空 */
+  requestedMenu?: SettingsMenuId | null;
+  onRequestedMenuHandled?: () => void;
 }
 
 // ==================== CLI 工具设置面板 (Claude Code 原始版式) ====================
@@ -179,6 +183,7 @@ interface CliToolPanelProps {
   packageName: string;
   installedVersion: string;
   onCheckLatest: () => Promise<{ latest: string; isLatest: boolean }>;
+  onRefreshInstalled: () => void;
 }
 
 const CliToolPanel: React.FC<CliToolPanelProps> = ({
@@ -188,9 +193,10 @@ const CliToolPanel: React.FC<CliToolPanelProps> = ({
   packageName,
   installedVersion,
   onCheckLatest,
+  onRefreshInstalled,
 }) => {
   const installCmd = `npm install -g ${packageName}`;
-  const updateCmd = `npm install -g ${packageName}@latest`;
+  const updateCmd = `npm install -g ${packageName}`;
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [checking, setChecking] = useState<boolean>(false);
   const [latestResult, setLatestResult] = useState<{
@@ -198,9 +204,96 @@ const CliToolPanel: React.FC<CliToolPanelProps> = ({
     isLatest: boolean;
   } | null>(null);
 
-  const handleCopy = (cmd: string) => {
+  // --- 一键安装/升级状态 ---
+  const [updating, setUpdating] = useState<boolean>(false);
+  const [updateLogs, setUpdateLogs] = useState<string[]>([]);
+  const [updateResult, setUpdateResult] = useState<"success" | "error" | null>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [pulseKey, setPulseKey] = useState<number>(0);
+  const startTimeRef = useRef<number>(0);
+  const logCountRef = useRef<number>(0);
+
+  // 事件回调需要最新 props，用 ref 兜底避免重复注册监听
+  const latestPropsRef = useRef({ title, onRefreshInstalled });
+  latestPropsRef.current = { title, onRefreshInstalled };
+
+  // 监听 npm 安装日志与完成事件（按包名过滤，两个面板互不干扰）
+  useEffect(() => {
+    let unlistenLog: (() => void) | undefined;
+    let unlistenDone: (() => void) | undefined;
+    (async () => {
+      unlistenLog = await listen<{ package: string; data: string }>("npm-install-log", (e) => {
+        if (e.payload.package !== packageName) return;
+        setUpdateLogs((prev) => [...prev, e.payload.data]);
+      });
+      unlistenDone = await listen<{ package: string; success: boolean }>("npm-install-finished", (e) => {
+        if (e.payload.package !== packageName) return;
+        setUpdating(false);
+        setUpdateResult(e.payload.success ? "success" : "error");
+        if (e.payload.success) {
+          // 升级成功后标记检测结果为已是最新，避免仍显示"有新版本可用"
+          setLatestResult((prev) => (prev ? { ...prev, isLatest: true } : prev));
+        }
+        latestPropsRef.current.onRefreshInstalled();
+        if (e.payload.success) {
+          notifySuccess(`${latestPropsRef.current.title} 已升级到最新版本`);
+        } else {
+          notifyError(`${latestPropsRef.current.title} 升级失败，请查看下方日志或手动执行更新命令`);
+        }
+      });
+    })();
+    return () => {
+      unlistenLog?.();
+      unlistenDone?.();
+    };
+  }, [packageName]);
+
+  // 日志框自动滚动到底部
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [updateLogs]);
+
+  // 安装计时器：updating 期间每秒刷新已用时
+  useEffect(() => {
+    if (!updating) return;
+    startTimeRef.current = Date.now();
+    setElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [updating]);
+
+  // 活动指示器：日志行数增加时触发一次脉冲动画（key 重放），npm 静默时保持静止
+  useEffect(() => {
+    if (updateLogs.length > logCountRef.current) {
+      logCountRef.current = updateLogs.length;
+      setPulseKey((k) => k + 1);
+    }
+  }, [updateLogs]);
+
+  const handleInstall = async (version?: string) => {
+    setUpdating(true);
+    setUpdateResult(null);
+    setUpdateLogs([]);
+    try {
+      await invoke<void>("npm_install_package", {
+        package: packageName,
+        version: version || null,
+      });
+    } catch (err) {
+      setUpdating(false);
+      setUpdateResult("error");
+      notifyError(`${title} 一键安装失败：${String(err)}`);
+    }
+  };
+
+  const handleCopy = (cmd: string, token: "install" | "update") => {
     navigator.clipboard.writeText(cmd).then(() => {
-      setCopiedCmd(cmd);
+      setCopiedCmd(token);
       setTimeout(() => setCopiedCmd(null), 1500);
     }).catch(() => {});
   };
@@ -261,8 +354,16 @@ const CliToolPanel: React.FC<CliToolPanelProps> = ({
                 <span className="cli-check-icon">⬆</span>
                 <div className="cli-check-info">
                   <span>有新版本可用：<strong>v{latestResult.latest}</strong></span>
-                  <span className="cli-check-hint">请使用下方更新命令升级</span>
+                  <span className="cli-check-hint">可一键升级，或使用下方更新命令手动执行</span>
                 </div>
+                <button
+                  type="button"
+                  className="cli-upgrade-btn"
+                  onClick={() => handleInstall()}
+                  disabled={updating}
+                >
+                  {updating ? "升级中..." : "一键升级"}
+                </button>
               </div>
             )}
           </div>
@@ -275,11 +376,21 @@ const CliToolPanel: React.FC<CliToolPanelProps> = ({
         <div className="cli-cmd-row">
           <code className="cli-cmd">{installCmd}</code>
           <button
-            className={`cli-copy-btn ${copiedCmd === installCmd ? "copied" : ""}`}
-            onClick={() => handleCopy(installCmd)}
+            className={`cli-copy-btn ${copiedCmd === "install" ? "copied" : ""}`}
+            onClick={() => handleCopy(installCmd, "install")}
           >
-            {copiedCmd === installCmd ? "已复制" : "复制"}
+            {copiedCmd === "install" ? "已复制" : "复制"}
           </button>
+          {versionMissing && (
+            <button
+              type="button"
+              className="cli-upgrade-btn"
+              onClick={() => handleInstall()}
+              disabled={updating}
+            >
+              {updating ? "安装中..." : "一键安装"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -289,19 +400,57 @@ const CliToolPanel: React.FC<CliToolPanelProps> = ({
         <div className="cli-cmd-row">
           <code className="cli-cmd">{updateCmd}</code>
           <button
-            className={`cli-copy-btn ${copiedCmd === updateCmd ? "copied" : ""}`}
-            onClick={() => handleCopy(updateCmd)}
+            className={`cli-copy-btn ${copiedCmd === "update" ? "copied" : ""}`}
+            onClick={() => handleCopy(updateCmd, "update")}
           >
-            {copiedCmd === updateCmd ? "已复制" : "复制"}
+            {copiedCmd === "update" ? "已复制" : "复制"}
           </button>
         </div>
       </div>
+
+      {/* 一键安装/升级进度与日志 */}
+      {(updating || updateLogs.length > 0 || updateResult) && (
+        <div className="settings-group">
+          <div className="settings-group-label cli-install-label">
+            {updateResult === "success" ? (
+              "安装完成 ✓"
+            ) : updateResult === "error" ? (
+              "安装失败"
+            ) : (
+              <>
+                <span className="cli-install-pulse" key={pulseKey} />
+                <span>安装进度</span>
+                <span className="cli-install-meta">已用时 {elapsedSeconds}s · {updateLogs.length} 行日志</span>
+              </>
+            )}
+          </div>
+          <div
+            className={`cli-install-log ${updateResult === "success" ? "ok" : updateResult === "error" ? "fail" : ""}`}
+            ref={logRef}
+          >
+            {updateLogs.length === 0 ? (
+              <div className="cli-install-log-placeholder">正在执行 npm install …</div>
+            ) : (
+              updateLogs.map((l, i) => <div key={i}>{l}</div>)
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onSessionsRenamed }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onSessionsRenamed, requestedMenu, onRequestedMenuHandled }) => {
   const [activeMenu, setActiveMenu] = useState<SettingsMenuId>("basic");
+
+  // 外部请求切换到指定菜单（打开弹窗或弹窗已打开时均生效）
+  useEffect(() => {
+    if (requestedMenu) {
+      setActiveMenu(requestedMenu);
+      onRequestedMenuHandled?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedMenu]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   // 返回应用：先播放退场动画再真正关闭（丝滑返回）
   const [closing, setClosing] = useState(false);
@@ -535,11 +684,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ show, onClose, onS
   });
 
   const [ccswitchPath, setCcswitchPath] = useState<string>(() => {
-    return localStorage.getItem("kkcoder_setting_ccswitch_path") || "";
+    // 正式 key 为 agentdesk_setting_ccswitch_path；旧 kkcoder key 兼容迁移
+    const val =
+      localStorage.getItem("agentdesk_setting_ccswitch_path")
+      || localStorage.getItem("kkcoder_setting_ccswitch_path")
+      || "";
+    if (val) localStorage.setItem("agentdesk_setting_ccswitch_path", val);
+    return val;
   });
 
   useEffect(() => {
-    localStorage.setItem("kkcoder_setting_ccswitch_path", ccswitchPath);
+    localStorage.setItem("agentdesk_setting_ccswitch_path", ccswitchPath);
     window.dispatchEvent(new CustomEvent("kkcoder-ccswitch-path-change", { detail: ccswitchPath }));
   }, [ccswitchPath]);
 
@@ -1084,6 +1239,7 @@ return (
                 packageName={CLAUDE_NPM_PACKAGE}
                 installedVersion={claudeInstalled}
                 onCheckLatest={checkClaudeLatest}
+                onRefreshInstalled={refreshClaudeInstalled}
               />
             )}
 
@@ -1096,6 +1252,7 @@ return (
                 packageName={CODEX_NPM_PACKAGE}
                 installedVersion={codexInstalled}
                 onCheckLatest={checkCodexLatest}
+                onRefreshInstalled={refreshCodexInstalled}
               />
             )}
 
