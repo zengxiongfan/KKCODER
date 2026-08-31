@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useLayoutEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { Sidebar, Session, ClaudeIcon, CodexIcon } from "./components/Sidebar";
@@ -329,6 +330,10 @@ function App() {
 
   // 颜色调色盘主题切换相关状态
   const [showThemeDropdown, setShowThemeDropdown] = useState<boolean>(false);
+  // 顶部 Tab 抽屉（全部已打开会话列表）开关与弹出位置（相对视口）
+  const [tabDrawerPos, setTabDrawerPos] = useState<{ top: number; right: number } | null>(null);
+  const drawerBtnRef = useRef<HTMLButtonElement>(null);
+  const drawerPanelRef = useRef<HTMLDivElement>(null);
   const [currentTheme, setCurrentTheme] = useState<string>(() => {
     return readStoredTheme();
   });
@@ -1664,6 +1669,27 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [activeSessionId, historyPanelOpen, openHistoryPanel]);
 
+  // 点击页面其他区域或按 Esc 关闭顶部 Tab 抽屉。
+  // 用捕获阶段(capture)监听，确保不被下层任何 stopPropagation 拦截；
+  // 通过目标判断排除按钮与面板内部点击。
+  useEffect(() => {
+    const handleMouseDownCapture = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (drawerPanelRef.current?.contains(target)) return;
+      if (drawerBtnRef.current?.contains(target)) return;
+      setTabDrawerPos(null);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTabDrawerPos(null);
+    };
+    document.addEventListener("mousedown", handleMouseDownCapture, true);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDownCapture, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
   // 监听主题发生变动的全局广播事件
   useEffect(() => {
     const handleThemeEvent = (e: Event) => {
@@ -2215,9 +2241,38 @@ function App() {
               })}
             </div>
 
-            {/* tab-bar 最右侧固定区域：查看历史按钮（仅在有激活会话时显示） */}
+            {/* tab-bar 最右侧固定区域：Tab 抽屉 + 查看历史按钮（仅在有激活会话时显示） */}
             {activeSessionId && (
               <div className="tab-bar-actions">
+                <button
+                  ref={drawerBtnRef}
+                  className={`tab-bar-drawer-btn ${tabDrawerPos ? "open" : ""}`}
+                  title="全部已打开的会话"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (tabDrawerPos) {
+                      setTabDrawerPos(null);
+                    } else {
+                      // 以按钮当前位置为准计算弹出坐标（fixed 定位，脱离 tab-bar overflow 裁剪）
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setTabDrawerPos({
+                        top: rect.bottom + 6,
+                        right: Math.max(8, window.innerWidth - rect.right),
+                      });
+                    }
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="8" y1="6" x2="21" y2="6" />
+                    <line x1="8" y1="12" x2="21" y2="12" />
+                    <line x1="8" y1="18" x2="21" y2="18" />
+                    <line x1="3" y1="6" x2="3.01" y2="6" />
+                    <line x1="3" y1="12" x2="3.01" y2="12" />
+                    <line x1="3" y1="18" x2="3.01" y2="18" />
+                  </svg>
+                  <span className="tab-drawer-badge">{openTabIds.length}</span>
+                </button>
                 <button
                   className="tab-bar-history-btn"
                   title="查看会话完整历史"
@@ -2228,6 +2283,63 @@ function App() {
                     <polyline points="12 6 12 12 16 14" />
                   </svg>
                 </button>
+                {tabDrawerPos &&
+                  createPortal(
+                    <div
+                      ref={drawerPanelRef}
+                      className="tab-drawer-panel"
+                      style={{ top: tabDrawerPos.top, right: tabDrawerPos.right }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                    {openTabIds.length === 0 ? (
+                      <div className="tab-drawer-empty">没有已打开的会话</div>
+                    ) : (
+                      openTabIds.map((tid) => {
+                        const s = sessions.find((sess) => sess.id === tid);
+                        if (!s) return null;
+                        const isActive = activeSessionId === tid;
+                        return (
+                          <div
+                            key={tid}
+                            className={`tab-drawer-item ${isActive ? "active" : ""}`}
+                            onClick={() => {
+                              setActiveSessionId(s.id);
+                              setGlowingSessionIds((prev) => prev.filter((id) => id !== s.id));
+                              setSelectedAgent(s.type);
+                              setTabDrawerPos(null);
+                            }}
+                          >
+                            <span className="tab-drawer-item-icon">
+                              {sessionBusy[s.id] ? (
+                                <span className="tab-loading-spinner" />
+                              ) : s.type === "claude" ? (
+                                <ClaudeIcon size={13} color="#D97757" />
+                              ) : (
+                                <CodexIcon size={13} color="var(--color-green)" />
+                              )}
+                            </span>
+                            <span className="tab-drawer-item-title">{s.name}</span>
+                            {s.project && !s.isTemp && (
+                              <span className="tab-drawer-item-project">{s.project}</span>
+                            )}
+                            <span
+                              className="tab-drawer-item-close"
+                              title="关闭标签页"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const ev = { stopPropagation: () => {} } as React.MouseEvent;
+                                handleCloseTab(ev, s.id);
+                              }}
+                            >
+                              ×
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>,
+                    document.body
+                  )}
               </div>
             )}
           </div>
