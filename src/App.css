@@ -3397,9 +3397,7 @@ input:checked + .switch-slider:before {
 }
 
 .file-preview-modal {
-  width: 80vw;
-  max-width: 1100px;
-  height: 82vh;
+  position: absolute;
   background: var(--bg-main);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -3412,6 +3410,7 @@ input:checked + .switch-slider:before {
 .preview-header {
   height: 38px;
   min-height: 38px;
+  cursor: grab;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3481,12 +3480,16 @@ input:checked + .switch-slider:before {
   overflow: auto;
   padding: 16px;
   user-select: text;
+  /* 底部留白：让滚动条上移，避让底部缩放手柄 */
+  margin-bottom: 10px;
 }
 
 /* 编辑器宿主：去掉 padding/滚动，让 Monaco 满高自己接管滚动 */
 .preview-body.editor-host {
   padding: 0;
   overflow: hidden;
+  /* 底部留白：让 Monaco 内建横向滚动条上移，避让底部缩放手柄 */
+  margin-bottom: 10px;
 }
 
 /* ==================== Monaco 文件编辑器 ==================== */
@@ -3841,6 +3844,74 @@ input:checked + .switch-slider:before {
   text-align: center;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+/* -------------------- 浮动弹窗缩放手柄（diff 弹窗 / 文件预览共用） -------------------- */
+.float-modal-handle {
+  position: absolute;
+  z-index: 9999;
+  touch-action: none;
+  border-radius: 4px;
+  transition: background-color 0.12s ease;
+}
+.float-modal-handle:hover {
+  background-color: rgba(128, 128, 128, 0.14);
+}
+.float-modal-handle-n {
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 5px;
+  cursor: ns-resize;
+}
+.float-modal-handle-s {
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 5px;
+  cursor: ns-resize;
+}
+.float-modal-handle-e {
+  right: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 5px;
+  cursor: ew-resize;
+}
+.float-modal-handle-w {
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 5px;
+  cursor: ew-resize;
+}
+.float-modal-handle-ne {
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
+}
+.float-modal-handle-nw {
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
+.float-modal-handle-se {
+  bottom: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+}
+.float-modal-handle-sw {
+  bottom: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nesw-resize;
 }
 
 /* 抽屉遮罩层 */
@@ -5646,9 +5717,7 @@ input:checked + .switch-slider:before {
 }
 
 .diff-modal {
-  width: 86vw;
-  max-width: 1280px; /* Monaco 并排 diff 两栏各占一半，加宽避免拥挤 */
-  height: 76vh;
+  position: absolute;
   background: var(--bg-sidebar, #1e1e2e);
   border: 1px solid var(--border-color);
   border-radius: 10px;
@@ -5662,6 +5731,7 @@ input:checked + .switch-slider:before {
   display: flex;
   align-items: center;
   padding: 10px 14px;
+  cursor: grab;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
@@ -5819,6 +5889,8 @@ input:checked + .switch-slider:before {
 /* Monaco DiffEditor 宿主：去掉滚动/内边距，让编辑器满高自管滚动 */
 .diff-modal-body.diff-editor-host {
   overflow: hidden;
+  /* 底部留白：让 Monaco 内建滚动条上移，避让底部缩放手柄（手柄占据贴边 0-5px） */
+  margin-bottom: 10px;
 }
 
 /* 头部未保存脏态点 */

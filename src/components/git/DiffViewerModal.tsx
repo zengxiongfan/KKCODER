@@ -19,6 +19,7 @@ import { X, RotateCcw, ArrowUp, ArrowDown, FoldVertical, UnfoldVertical, Save } 
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { getMonacoTheme, getMonacoLanguage } from "../../utils/monacoSetup";
+import { useFloatingModal, FloatModalResizeHandles } from "../../hooks/useFloatingModal";
 
 interface DiffViewerModalProps {
   projectPath: string;
@@ -308,11 +309,24 @@ export const DiffViewerModal: FC<DiffViewerModalProps> = ({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [requestClose]);
 
+  // 可拖动 + 可缩放（位置/尺寸持久化到 localStorage）
+  const { rect, startMove, startResize } = useFloatingModal({
+    storageKey: "kkcoder_setting_diff_modal_rect",
+    defaultWidth: Math.round(window.innerWidth * 0.86),
+    defaultHeight: Math.round(window.innerHeight * 0.76),
+    minWidth: 480,
+    minHeight: 320,
+  });
+
   return (
     <div className="diff-modal-overlay" onClick={requestClose}>
-      <div className="diff-modal" onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
-        <div className="diff-modal-header">
+      <div
+        className="diff-modal"
+        style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 头部（按住可拖动，按钮/输入等内部控件除外） */}
+        <div className="diff-modal-header" onPointerDown={startMove}>
           <span className="diff-modal-title">
             {fileName}
             {sha && <span className="diff-modal-sha">@ {sha.slice(0, 7)}</span>}
@@ -403,6 +417,8 @@ export const DiffViewerModal: FC<DiffViewerModalProps> = ({
             />
           )}
         </div>
+        {/* 八方向边界缩放手柄 */}
+        <FloatModalResizeHandles startResize={startResize} />
       </div>
 
       {/* 关闭前未保存确认 */}

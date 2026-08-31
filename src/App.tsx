@@ -15,11 +15,12 @@ import { SessionHistoryPanel } from "./components/SessionHistoryPanel";
 import { renderMarkdownToHtml } from "./utils/markdown";
 import { applyTheme, readStoredTheme, THEME_DEFINITIONS, THEME_STORAGE_KEY } from "./utils/theme";
 import { FileEditor, type FileEditorHandle } from "./components/FileEditor";
-import { FileText, Folder, GitBranch, GitCommit } from "lucide-react";
+import { FileText, Folder, GitBranch, GitCommit, Save } from "lucide-react";
 import agentdeskIcon from "./assets/brand/agentdesk-icon.png";
 import { AppToastHost } from "./components/AppToastHost";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { useAppFeedback, useSessionQueueEngine } from "./hooks";
+import { useFloatingModal, FloatModalResizeHandles } from "./hooks/useFloatingModal";
 import { getSessionQueue, MAX_SESSION_QUEUE_SIZE } from "./utils/sessionQueue";
 import { notifyWarning, formatFeedbackError } from "./utils/appFeedback";
 import {
@@ -439,6 +440,18 @@ function App() {
   const [previewFontSize, setPreviewFontSize] = useState<number>(() => {
     const val = localStorage.getItem("agentdesk_setting_preview_font_size");
     return val ? parseFloat(val) : 12.5;
+  });
+  // 文件预览弹窗：可拖动 + 可缩放（位置/尺寸持久化）
+  const {
+    rect: previewRect,
+    startMove: previewStartMove,
+    startResize: previewStartResize,
+  } = useFloatingModal({
+    storageKey: "kkcoder_setting_file_preview_rect",
+    defaultWidth: Math.round(window.innerWidth * 0.8),
+    defaultHeight: Math.round(window.innerHeight * 0.82),
+    minWidth: 480,
+    minHeight: 300,
   });
   const startProjectTreeResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -934,6 +947,7 @@ function App() {
   // Monaco 编辑器：脏态 + 保存句柄
   const fileEditorRef = useRef<FileEditorHandle>(null);
   const [fileDirty, setFileDirty] = useState(false);
+  const [previewSaving, setPreviewSaving] = useState(false);
 
   // 由 Monaco 选区行号直接添加到对话（编辑模式下走此路径）
   const handleAddLinesToConversation = useCallback((startLine: number, endLine: number) => {
@@ -2448,9 +2462,15 @@ function App() {
               <div className="file-preview-overlay" onClick={closePreview}>
                 <div
                   className="file-preview-modal"
+                  style={{
+                    left: previewRect.x,
+                    top: previewRect.y,
+                    width: previewRect.width,
+                    height: previewRect.height,
+                  }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                <div className="preview-header">
+                <div className="preview-header" onPointerDown={previewStartMove}>
                   <div className="preview-title-area">
                     <FileText size={14} className="preview-file-icon" />
                     <span className="preview-file-name" title={previewFile.path.split("/").pop()}>
@@ -2476,6 +2496,26 @@ function App() {
                       </button>
                     </div>
                   )}
+                  {!previewFile.cannotPreview &&
+                    !(previewFile.path.endsWith(".md") && mdMode === "preview") && (
+                      <button
+                        type="button"
+                        className="diff-modal-btn"
+                        onClick={async () => {
+                          setPreviewSaving(true);
+                          try {
+                            await fileEditorRef.current?.save();
+                          } finally {
+                            setPreviewSaving(false);
+                          }
+                        }}
+                        disabled={!fileDirty || previewSaving}
+                        title="保存 (Ctrl+S)"
+                      >
+                        <Save size={13} />
+                        {previewSaving ? "保存中…" : "保存"}
+                      </button>
+                    )}
                   <button
                     className="preview-close-btn"
                     onClick={closePreview}
@@ -2532,6 +2572,8 @@ function App() {
                     />
                   )}
                 </div>
+                {/* 八方向边界缩放手柄 */}
+                <FloatModalResizeHandles startResize={previewStartResize} />
 
                 </div>
               </div>
